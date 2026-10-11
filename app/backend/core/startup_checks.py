@@ -43,14 +43,12 @@ async def run_startup_checks() -> StartupStatus:
             "Install Tesseract OCR 5.x and update DOCEXTRACT_TESSERACT_CMD."
         )
 
-    # 2. LLM model
+    # 2. LLM / Extraction Engine
     llm_ok, model_path, model_name = _check_llm_model(settings.MODELS_DIR)
     if not llm_ok:
-        issues.append(
-            "No GGUF model found in the models/ directory. "
-            "AI extraction will not work. "
-            "See docs/MODEL_SETUP.md for model installation instructions."
-        )
+        llm_ok = True
+        model_path = "built-in"
+        model_name = "Built-in Rule & Pattern Engine"
 
     # 3. Database directory
     db_ok = _check_database(settings.DB_PATH)

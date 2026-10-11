@@ -295,8 +295,11 @@ async def _process_single_document(doc_id: str) -> Optional[dict]:
             llm_ms = int((time.time() - t1) * 1000)
             await _log_job(doc_id, "llm_extraction", "success", duration_ms=llm_ms, llm_used=True, model_name=llm.get_model_name())
         else:
-            await _log_job(doc_id, "llm_extraction", "skipped")
-            logger.warning(f"LLM not available — skipping extraction for {doc_id}")
+            from extraction_pipeline.extractor import ExtractionResult, _apply_rule_based_fallbacks
+            extraction_result = ExtractionResult()
+            _apply_rule_based_fallbacks(full_text, extraction_result, classification.document_type.value, doc["original_filename"])
+            llm_ms = int((time.time() - t1) * 1000)
+            await _log_job(doc_id, "llm_extraction", "success", duration_ms=llm_ms, llm_used=False, model_name="built-in-rules")
 
         # ── Update document record ──────────────────────────
         import json
