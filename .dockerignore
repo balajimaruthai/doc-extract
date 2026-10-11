@@ -1,0 +1,13 @@
+.git
+.github
+node_modules
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.venv
+venv
+desktop_app.log
+launcher.log
+cloudflared.exe
+DocExtract.exe

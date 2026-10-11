@@ -1,0 +1,29 @@
+{
+  "name": "docextract-frontend",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Offline Document Intelligence — Desktop UI",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 1420",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.28.0",
+    "zustand": "^5.0.1",
+    "@tauri-apps/api": "^2.1.1",
+    "lucide-react": "^0.461.0",
+    "clsx": "^2.1.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.3",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.10"
+  }
+}

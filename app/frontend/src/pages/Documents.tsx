@@ -1,0 +1,715 @@
+import { useEffect, useState, useRef } from 'react'
+import { Upload, FileText, Trash2, RefreshCw, Eye, AlertTriangle, X, BookOpen, Sparkles, User, Calendar, CheckCircle2 } from 'lucide-react'
+import { documentsApi, type DocumentRecord, type PageText } from '../api/client'
+
+const STATUS_LABELS: Record<string, { label: string; class: string }> = {
+  pending: { label: 'Pending', class: 'badge-neutral' },
+  processing: { label: 'Processing…', class: 'badge-info' },
+  completed: { label: 'Completed', class: 'badge-success' },
+  failed: { label: 'Failed', class: 'badge-error' },
+  review: { label: 'Needs Review', class: 'badge-warning' },
+}
+
+const DOC_TYPE_LABELS: Record<string, string> = {
+  resume: 'Resume / CV',
+  cv: 'Resume / CV',
+  degree_certificate: 'Degree Certificate',
+  marksheet: 'Marksheet',
+  experience_letter: 'Experience Letter',
+  offer_letter: 'Offer Letter',
+  appointment_letter: 'Appointment Letter',
+  internship_certificate: 'Internship Certificate',
+  professional_certificate: 'Professional Certificate',
+  training_certificate: 'Training Certificate',
+  achievement_certificate: 'Achievement Certificate',
+  research_paper: 'Research / Conference Paper',
+  project_report: 'Project Report',
+  book: 'Book / Publication',
+  photo_document: 'Image / Scanned Document',
+  needs_review: 'Needs Review',
+  other: 'General Document',
+}
+
+export function Documents() {
+  const [documents, setDocuments] = useState<DocumentRecord[]>([])
+  const [total, setTotal] = useState(0)
+  const [loading, setLoading] = useState(true)
+  const [uploading, setUploading] = useState(false)
+  const [dragActive, setDragActive] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [selectedDoc, setSelectedDoc] = useState<DocumentRecord | null>(null)
+  const [docPages, setDocPages] = useState<PageText[]>([])
+  const [loadingPages, setLoadingPages] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const ACCEPTED = '.pdf,.docx,.doc,.jpg,.jpeg,.png'
+
+  const loadDocuments = async () => {
+    try {
+      const result = await documentsApi.list({ limit: 100 })
+      setDocuments(result.documents)
+      setTotal(result.total)
+    } catch (e: any) {
+      setError(e.message)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => { loadDocuments() }, [])
+
+  const handleFiles = async (files: FileList | File[]) => {
+    const fileArray = Array.from(files)
+    if (fileArray.length === 0) return
+
+    setUploading(true)
+    setError(null)
+    try {
+      for (const file of fileArray) {
+        await documentsApi.upload(file)
+      }
+      await loadDocuments()
+    } catch (e: any) {
+      setError(e.message)
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  const handleDelete = async (docId: string) => {
+    if (!confirm('Are you sure you want to delete this document?')) return
+    try {
+      await documentsApi.delete(docId)
+      if (selectedDoc?.id === docId) setSelectedDoc(null)
+      await loadDocuments()
+    } catch (e: any) {
+      setError(e.message)
+    }
+  }
+
+  const handleView = async (doc: DocumentRecord) => {
+    setSelectedDoc(doc)
+    setLoadingPages(true)
+    try {
+      const [res, fullDoc] = await Promise.all([
+        documentsApi.getText(doc.id),
+        documentsApi.get(doc.id).catch(() => doc)
+      ])
+      setDocPages(res.pages)
+      if (fullDoc) setSelectedDoc(fullDoc)
+    } catch (e: any) {
+      setError(e.message)
+    } finally {
+      setLoadingPages(false)
+    }
+  }
+
+  const formatSize = (bytes: number) => {
+    if (bytes < 1024) return `${bytes} B`
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  }
+
+  const formatDate = (iso: string) => {
+    try {
+      return new Date(iso).toLocaleDateString(undefined, {
+        month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'
+      })
+    } catch {
+      return iso
+    }
+  }
+
+  // Parse custom metadata if available
+  const parseMetadata = (jsonStr?: string | null) => {
+    if (!jsonStr) return null
+    try {
+      return JSON.parse(jsonStr)
+    } catch {
+      return null
+    }
+  }
+
+  const metadata = selectedDoc ? parseMetadata(selectedDoc.metadata_json) : null
+
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-lg">
+        <div>
+          <h1 style={{ fontSize: 24, fontWeight: 700 }}>Documents</h1>
+          <p className="text-muted text-sm mt-xs">
+            {total} document{total !== 1 ? 's' : ''} stored locally on this machine
+          </p>
+        </div>
+        <button
+          className="btn btn-secondary btn-sm"
+          onClick={loadDocuments}
+          disabled={loading}
+        >
+          <RefreshCw size={13} className={loading ? 'spinner' : ''} />
+          Refresh
+        </button>
+      </div>
+
+      {error && (
+        <div className="card mb-md flex justify-between items-center" style={{ borderColor: 'var(--color-error)', backgroundColor: 'rgba(239, 68, 68, 0.05)', padding: '10px 16px' }}>
+          <div className="flex items-center gap-sm">
+            <AlertTriangle size={16} color="var(--color-error)" />
+            <span style={{ color: 'var(--color-error)', fontSize: 13, fontWeight: 500 }}>{error}</span>
+          </div>
+          <button className="btn btn-secondary btn-sm" onClick={() => setError(null)} style={{ padding: '2px 8px', fontSize: 11 }}>
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {/* Upload Drop Zone */}
+      <div
+        className={`card upload-zone mb-lg ${dragActive ? 'upload-zone-active' : ''}`}
+        onDragEnter={e => { e.preventDefault(); setDragActive(true) }}
+        onDragLeave={e => { e.preventDefault(); setDragActive(false) }}
+        onDragOver={e => e.preventDefault()}
+        onDrop={e => { e.preventDefault(); setDragActive(false); handleFiles(e.dataTransfer.files) }}
+        onClick={() => fileInputRef.current?.click()}
+        style={{ cursor: 'pointer', textAlign: 'center', padding: '32px 16px' }}
+      >
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept={ACCEPTED}
+          style={{ display: 'none' }}
+          onChange={e => e.target.files && handleFiles(e.target.files)}
+        />
+        <div className="flex flex-col items-center gap-sm">
+          <div style={{
+            width: 48, height: 48, borderRadius: '50%',
+            backgroundColor: 'var(--color-primary-light)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center'
+          }}>
+            <Upload size={22} color="var(--color-primary)" />
+          </div>
+          <div>
+            <div style={{ fontWeight: 600, fontSize: 14 }}>
+              {uploading ? 'Validating and saving locally…' : 'Drop any document here, or browse files'}
+            </div>
+            <div className="text-muted text-xs mt-xs">
+              Supports Resumes, Books, Project Reports, Research Papers, Certificates, Photos &amp; Scans (PDF, DOCX, JPG, PNG)
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Documents Table */}
+      {loading ? (
+        <div className="card" style={{ textAlign: 'center', padding: 48 }}>
+          <div className="spinner" style={{ margin: '0 auto 12px' }} />
+          <div className="text-muted text-sm">Loading document inventory…</div>
+        </div>
+      ) : documents.length === 0 ? (
+        <div className="card" style={{ textAlign: 'center', padding: 48 }}>
+          <FileText size={40} style={{ color: 'var(--color-border)', margin: '0 auto 12px' }} />
+          <div style={{ fontWeight: 600 }}>No documents uploaded yet</div>
+          <div className="text-muted text-sm mt-xs">
+            Drop your documents above to begin local intelligence extraction.
+          </div>
+        </div>
+      ) : (
+        <div className="card" style={{ padding: 0 }}>
+          <div className="table-container">
+            <table>
+              <thead>
+                <tr>
+                  <th>Filename</th>
+                  <th>Format</th>
+                  <th>Detected Category</th>
+                  <th>Size</th>
+                  <th>Pages</th>
+                  <th>OCR</th>
+                  <th>Status</th>
+                  <th>Uploaded</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {documents.map(doc => {
+                  const s = STATUS_LABELS[doc.processing_status] ?? { label: doc.processing_status, class: 'badge-neutral' }
+                  return (
+                    <tr key={doc.id}>
+                      <td className="truncate" style={{ maxWidth: 220 }}>
+                        <div className="flex items-center gap-sm">
+                          <FileText size={14} style={{ color: 'var(--color-text-muted)', flexShrink: 0 }} />
+                          <span title={doc.original_filename} style={{ fontWeight: 500 }}>{doc.original_filename}</span>
+                        </div>
+                      </td>
+                      <td><span className="badge badge-neutral">{doc.file_type.toUpperCase()}</span></td>
+                      <td>
+                        <span className="badge badge-info" style={{ fontSize: 11 }}>
+                          {doc.document_type ? (DOC_TYPE_LABELS[doc.document_type] ?? doc.document_type) : 'Pending'}
+                        </span>
+                      </td>
+                      <td className="text-muted">{formatSize(doc.file_size)}</td>
+                      <td className="text-muted">{doc.page_count ?? '—'}</td>
+                      <td>{doc.ocr_performed ? <span className="badge badge-info">OCR</span> : <span className="text-muted">—</span>}</td>
+                      <td><span className={`badge ${s.class}`}>{s.label}</span></td>
+                      <td className="text-muted text-xs">{formatDate(doc.upload_timestamp)}</td>
+                      <td>
+                        <div className="flex gap-sm items-center">
+                          {doc.processing_status === 'completed' && (
+                            <button
+                              className="btn btn-primary btn-sm"
+                              style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 10px', fontSize: 12, fontWeight: 600 }}
+                              onClick={() => handleView(doc)}
+                              title="View Document Intelligence"
+                            >
+                              <Eye size={13} /> View
+                            </button>
+                          )}
+                          <button
+                            className="btn btn-danger btn-sm"
+                            style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '5px 7px', minWidth: 28 }}
+                            onClick={() => handleDelete(doc.id)}
+                            title="Delete document"
+                          >
+                            <Trash2 size={13} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Intelligence & Extracted Content Modal (Times New Roman, Line-by-Line Reader View) */}
+      {selectedDoc && (
+        <div style={{
+          position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+          backgroundColor: 'rgba(0,0,0,0.65)', display: 'flex', alignItems: 'center', justifyContent: 'center',
+          zIndex: 1000, padding: 20
+        }}>
+          <div style={{
+            maxWidth: 780, width: '100%', maxHeight: '90vh', overflowY: 'auto',
+            backgroundColor: '#ffffff', color: '#111827', borderRadius: 10,
+            padding: '36px 40px', boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.3)',
+            fontFamily: '"Times New Roman", Times, serif',
+            position: 'relative'
+          }}>
+            {/* Top Header */}
+            <div style={{
+              display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start',
+              borderBottom: '2px solid #e5e7eb', paddingBottom: 16, marginBottom: 24
+            }}>
+              <div>
+                <div style={{ fontSize: 13, textTransform: 'uppercase', letterSpacing: '0.06em', color: '#6b7280', marginBottom: 4 }}>
+                  Document Intelligence Summary
+                </div>
+                <h2 style={{ fontSize: 24, fontWeight: 700, margin: 0, color: '#111827', lineHeight: 1.3 }}>
+                  {selectedDoc.original_filename}
+                </h2>
+              </div>
+              <button
+                onClick={() => setSelectedDoc(null)}
+                style={{
+                  background: 'none', border: '1px solid #d1d5db', borderRadius: '50%',
+                  width: 32, height: 32, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                  cursor: 'pointer', color: '#6b7280'
+                }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            {/* Extracted Specific Content Line by Line */}
+            {(() => {
+              const toLines = (val: any): string[] => {
+                if (!val) return []
+                if (Array.isArray(val)) return val.map(String).map(s => s.trim()).filter(Boolean)
+                if (typeof val === 'string') {
+                  return val
+                    .split(/\r?\n|•|(?<=[.?!])\s+(?=[A-Z0-9])/)
+                    .map(s => s.trim().replace(/^[-*•\d.)\s]+/, ''))
+                    .filter(s => s.length > 3)
+                }
+                return []
+              }
+
+              const firstPageText = docPages[0]?.cleaned_text || ''
+
+              const title = metadata?.title || (firstPageText ? firstPageText.split(/\r?\n/)[0]?.trim().slice(0, 120) : selectedDoc.original_filename)
+              
+              const documentSummary = metadata?.document_summary || (
+                firstPageText ? firstPageText.split(/\r?\n\r?\n|(?<=[.?!])\s+/).filter((s: string) => s.trim().length > 30).slice(0, 2).join(' ').trim() : null
+              )
+              
+              const whatHeWants = metadata?.what_he_wants
+              const whatHeKnows = toLines(metadata?.what_he_knows || metadata?.skills)
+              const certifications = toLines(metadata?.certifications || metadata?.education)
+              const personal = metadata?.personal
+              
+              let authors = toLines(metadata?.authors)
+              if (authors.length === 0 && firstPageText) {
+                const authorMatch = firstPageText.match(/(?:by|authors?|contributors?)\s*[:\-\s]\s*([^\n\r]+)/i)
+                if (authorMatch) {
+                  authors = authorMatch[1].split(/[,;]|\band\b/).map((s: string) => s.trim()).filter((s: string) => s.length > 2 && s.length < 50)
+                }
+              }
+
+              const year = (metadata?.year && !['not provided', 'null', 'none'].includes(String(metadata.year).toLowerCase())) ? String(metadata.year) : null
+              
+              let conceptLines = toLines(metadata?.concept)
+              if (conceptLines.length === 0 && firstPageText) {
+                const sentences = firstPageText.split(/(?<=[.?!])\s+/).map((s: string) => s.trim()).filter((s: string) => s.length > 25)
+                const relevant = sentences.filter((s: string) => /(?:methodology|proposed|system|architecture|algorithm|model|framework|capsule|lstm|feature)/i.test(s))
+                if (relevant.length > 0) conceptLines = relevant.slice(0, 4)
+              }
+
+              let highlightLines = toLines(metadata?.highlights)
+              if (highlightLines.length === 0 && firstPageText) {
+                const bullets = firstPageText.split(/\r?\n/)
+                  .map((s: string) => s.trim())
+                  .filter((s: string) => (s.startsWith('-') || s.startsWith('•') || s.startsWith('*') || /^\d+\./.test(s)) && s.length > 15)
+                  .map((s: string) => s.replace(/^[-*•\d.)\s]+/, '').trim())
+                if (bullets.length > 0) {
+                  highlightLines = bullets.slice(0, 5)
+                } else {
+                  const keySentences = firstPageText.split(/(?<=[.?!])\s+/).map((s: string) => s.trim()).filter((s: string) => /(?:accuracy|performance|achieved|results|findings|conclusion|demonstrate|improves)/i.test(s) && s.length > 25)
+                  if (keySentences.length > 0) highlightLines = keySentences.slice(0, 4)
+                }
+              }
+
+              const isBook = selectedDoc.document_type === 'book'
+              const isProject = selectedDoc.document_type === 'project_report'
+              const isPaper = selectedDoc.document_type === 'research_paper'
+              const isPhoto = selectedDoc.document_type === 'photo_document'
+              const isResume = ['resume', 'cv'].includes(selectedDoc.document_type || '')
+              const isCert = ['degree_certificate', 'marksheet', 'experience_letter', 'offer_letter', 'appointment_letter', 'internship_certificate', 'professional_certificate', 'training_certificate', 'achievement_certificate'].includes(selectedDoc.document_type || '')
+
+              return (
+                <div style={{ fontSize: 16, lineHeight: 1.85, color: '#1f2937' }}>
+                  {/* Title */}
+                  {title && (
+                    <div style={{ marginBottom: 20 }}>
+                      <div style={{ fontWeight: 700, fontSize: 17, color: '#111827' }}>Title:</div>
+                      <div style={{ fontSize: 18, fontWeight: 600, color: '#1e3a8a', marginTop: 2 }}>{title}</div>
+                    </div>
+                  )}
+
+                  {/* Document Category */}
+                  <div style={{ marginBottom: 20 }}>
+                    <div style={{ fontWeight: 700, fontSize: 17, color: '#111827' }}>Document Category:</div>
+                    <div style={{ fontSize: 16, color: '#374151' }}>
+                      <span className="badge badge-info" style={{ fontSize: 13, padding: '3px 10px', marginTop: 4 }}>
+                        {selectedDoc.document_type ? (DOC_TYPE_LABELS[selectedDoc.document_type] ?? selectedDoc.document_type) : 'Document'}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* ── BOOK VIEW ── */}
+                  {isBook && (
+                    <>
+                      {documentSummary && (
+                        <div style={{ marginBottom: 24, backgroundColor: '#f8fafc', padding: '16px 20px', borderRadius: 6, borderLeft: '4px solid #0284c7' }}>
+                          <div style={{ fontWeight: 700, fontSize: 17, color: '#0369a1', marginBottom: 6 }}>📖 Content &amp; Overview:</div>
+                          <div style={{ fontSize: 16, lineHeight: 1.85, color: '#334155' }}>{documentSummary}</div>
+                        </div>
+                      )}
+                      {authors.length > 0 && (
+                        <div style={{ marginBottom: 20 }}>
+                          <div style={{ fontWeight: 700, fontSize: 17, color: '#111827', marginBottom: 6 }}>✍️ Author(s):</div>
+                          <ul style={{ margin: 0, paddingLeft: 24 }}>
+                            {authors.map((a, i) => <li key={i} style={{ marginBottom: 4 }}>{a}</li>)}
+                          </ul>
+                        </div>
+                      )}
+                      {year && (
+                        <div style={{ marginBottom: 20 }}>
+                          <div style={{ fontWeight: 700, fontSize: 17, color: '#111827' }}>📅 Publication Year / Edition:</div>
+                          <div style={{ fontSize: 16, color: '#374151' }}>{year}</div>
+                        </div>
+                      )}
+                      {highlightLines.length > 0 && (
+                        <div style={{ marginBottom: 24, backgroundColor: '#f9fafb', padding: '16px 20px', borderRadius: 6, borderLeft: '4px solid #059669' }}>
+                          <div style={{ fontWeight: 700, fontSize: 17, color: '#065f46', marginBottom: 8 }}>🌟 Core Chapters &amp; Highlights:</div>
+                          <ul style={{ margin: 0, paddingLeft: 24 }}>
+                            {highlightLines.map((h, i) => <li key={i} style={{ marginBottom: 6, lineHeight: 1.8 }}>{h}</li>)}
+                          </ul>
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  {/* ── PROJECT REPORT VIEW ── */}
+                  {isProject && (
+                    <>
+                      {documentSummary && (
+                        <div style={{ marginBottom: 24, backgroundColor: '#f8fafc', padding: '16px 20px', borderRadius: 6, borderLeft: '4px solid #0284c7' }}>
+                          <div style={{ fontWeight: 700, fontSize: 17, color: '#0369a1', marginBottom: 6 }}>📁 Project Summary:</div>
+                          <div style={{ fontSize: 16, lineHeight: 1.85, color: '#334155' }}>{documentSummary}</div>
+                        </div>
+                      )}
+                      {whatHeWants && (
+                        <div style={{ marginBottom: 24, backgroundColor: '#fdf4ff', padding: '16px 20px', borderRadius: 6, borderLeft: '4px solid #a855f7' }}>
+                          <div style={{ fontWeight: 700, fontSize: 17, color: '#7e22ce', marginBottom: 6 }}>🎯 Project Aim &amp; Objectives:</div>
+                          <div style={{ fontSize: 16, lineHeight: 1.85, color: '#3b0764' }}>{whatHeWants}</div>
+                        </div>
+                      )}
+                      {conceptLines.length > 0 && (
+                        <div style={{ marginBottom: 24, backgroundColor: '#eff6ff', padding: '16px 20px', borderRadius: 6, borderLeft: '4px solid #3b82f6' }}>
+                          <div style={{ fontWeight: 700, fontSize: 17, color: '#1d4ed8', marginBottom: 8 }}>💡 Concept &amp; System Architecture:</div>
+                          <ul style={{ margin: 0, paddingLeft: 24 }}>
+                            {conceptLines.map((c, i) => <li key={i} style={{ marginBottom: 6, lineHeight: 1.8 }}>{c}</li>)}
+                          </ul>
+                        </div>
+                      )}
+                      {whatHeKnows.length > 0 && (
+                        <div style={{ marginBottom: 24 }}>
+                          <div style={{ fontWeight: 700, fontSize: 17, color: '#111827', marginBottom: 8 }}>🛠️ Technologies &amp; Tools Used:</div>
+                          <ul style={{ margin: 0, paddingLeft: 24 }}>
+                            {whatHeKnows.map((k, i) => <li key={i} style={{ marginBottom: 6, lineHeight: 1.8 }}>{k}</li>)}
+                          </ul>
+                        </div>
+                      )}
+                      {highlightLines.length > 0 && (
+                        <div style={{ marginBottom: 24, backgroundColor: '#f9fafb', padding: '16px 20px', borderRadius: 6, borderLeft: '4px solid #059669' }}>
+                          <div style={{ fontWeight: 700, fontSize: 17, color: '#065f46', marginBottom: 8 }}>✨ Key Implementation Highlights &amp; Results:</div>
+                          <ul style={{ margin: 0, paddingLeft: 24 }}>
+                            {highlightLines.map((h, i) => <li key={i} style={{ marginBottom: 6, lineHeight: 1.8 }}>{h}</li>)}
+                          </ul>
+                        </div>
+                      )}
+                      {authors.length > 0 && (
+                        <div style={{ marginBottom: 20 }}>
+                          <div style={{ fontWeight: 700, fontSize: 17, color: '#111827', marginBottom: 6 }}>👥 Contributors / Project Guide:</div>
+                          <ul style={{ margin: 0, paddingLeft: 24 }}>
+                            {authors.map((a, i) => <li key={i} style={{ marginBottom: 4 }}>{a}</li>)}
+                          </ul>
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  {/* ── RESEARCH PAPER VIEW ── */}
+                  {isPaper && (
+                    <>
+                      {documentSummary && (
+                        <div style={{ marginBottom: 24, backgroundColor: '#f8fafc', padding: '16px 20px', borderRadius: 6, borderLeft: '4px solid #0284c7' }}>
+                          <div style={{ fontWeight: 700, fontSize: 17, color: '#0369a1', marginBottom: 6 }}>🔬 Abstract &amp; Overview:</div>
+                          <div style={{ fontSize: 16, lineHeight: 1.85, color: '#334155' }}>{documentSummary}</div>
+                        </div>
+                      )}
+                      {authors.length > 0 && (
+                        <div style={{ marginBottom: 20 }}>
+                          <div style={{ fontWeight: 700, fontSize: 17, color: '#111827', marginBottom: 6 }}>👥 Authors &amp; Affiliations:</div>
+                          <ul style={{ margin: 0, paddingLeft: 24 }}>
+                            {authors.map((a, i) => <li key={i} style={{ marginBottom: 4 }}>{a}</li>)}
+                          </ul>
+                        </div>
+                      )}
+                      {conceptLines.length > 0 && (
+                        <div style={{ marginBottom: 24, backgroundColor: '#eff6ff', padding: '16px 20px', borderRadius: 6, borderLeft: '4px solid #3b82f6' }}>
+                          <div style={{ fontWeight: 700, fontSize: 17, color: '#1d4ed8', marginBottom: 8 }}>💡 Proposed Concept &amp; Methodology:</div>
+                          <ul style={{ margin: 0, paddingLeft: 24 }}>
+                            {conceptLines.map((c, i) => <li key={i} style={{ marginBottom: 6, lineHeight: 1.8 }}>{c}</li>)}
+                          </ul>
+                        </div>
+                      )}
+                      {highlightLines.length > 0 && (
+                        <div style={{ marginBottom: 24, backgroundColor: '#f9fafb', padding: '16px 20px', borderRadius: 6, borderLeft: '4px solid #059669' }}>
+                          <div style={{ fontWeight: 700, fontSize: 17, color: '#065f46', marginBottom: 8 }}>✨ Key Findings &amp; Accuracy Highlights:</div>
+                          <ul style={{ margin: 0, paddingLeft: 24 }}>
+                            {highlightLines.map((h, i) => <li key={i} style={{ marginBottom: 6, lineHeight: 1.8 }}>{h}</li>)}
+                          </ul>
+                        </div>
+                      )}
+                      {year && (
+                        <div style={{ marginBottom: 20 }}>
+                          <div style={{ fontWeight: 700, fontSize: 17, color: '#111827' }}>📅 Publication Year / Conference:</div>
+                          <div style={{ fontSize: 16, color: '#374151' }}>{year}</div>
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  {/* ── PHOTO / SCANNED DOCUMENT VIEW ── */}
+                  {isPhoto && (
+                    <>
+                      {documentSummary && (
+                        <div style={{ marginBottom: 24, backgroundColor: '#f8fafc', padding: '16px 20px', borderRadius: 6, borderLeft: '4px solid #0284c7' }}>
+                          <div style={{ fontWeight: 700, fontSize: 17, color: '#0369a1', marginBottom: 6 }}>🖼️ Extracted Photo / Document Data:</div>
+                          <div style={{ fontSize: 16, lineHeight: 1.85, color: '#334155' }}>{documentSummary}</div>
+                        </div>
+                      )}
+                      {highlightLines.length > 0 && (
+                        <div style={{ marginBottom: 24, backgroundColor: '#f9fafb', padding: '16px 20px', borderRadius: 6, borderLeft: '4px solid #059669' }}>
+                          <div style={{ fontWeight: 700, fontSize: 17, color: '#065f46', marginBottom: 8 }}>✨ Optical Highlights &amp; Text Data:</div>
+                          <ul style={{ margin: 0, paddingLeft: 24 }}>
+                            {highlightLines.map((h, i) => <li key={i} style={{ marginBottom: 6, lineHeight: 1.8 }}>{h}</li>)}
+                          </ul>
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  {/* ── RESUME / CV VIEW ── */}
+                  {isResume && (
+                    <>
+                      {documentSummary && (
+                        <div style={{ marginBottom: 24, backgroundColor: '#f8fafc', padding: '16px 20px', borderRadius: 6, borderLeft: '4px solid #0284c7' }}>
+                          <div style={{ fontWeight: 700, fontSize: 17, color: '#0369a1', marginBottom: 6 }}>📝 Summary of Whole Document (Short Version):</div>
+                          <div style={{ fontSize: 16, lineHeight: 1.85, color: '#334155' }}>{documentSummary}</div>
+                        </div>
+                      )}
+                      {whatHeWants && (
+                        <div style={{ marginBottom: 24, backgroundColor: '#fdf4ff', padding: '16px 20px', borderRadius: 6, borderLeft: '4px solid #a855f7' }}>
+                          <div style={{ fontWeight: 700, fontSize: 17, color: '#7e22ce', marginBottom: 6 }}>🎯 What He Wants / Target Objective:</div>
+                          <div style={{ fontSize: 16, lineHeight: 1.85, color: '#3b0764' }}>{whatHeWants}</div>
+                        </div>
+                      )}
+                      {whatHeKnows.length > 0 && (
+                        <div style={{ marginBottom: 24 }}>
+                          <div style={{ fontWeight: 700, fontSize: 17, color: '#111827', marginBottom: 8 }}>💡 What He Knows (Skills &amp; Knowledge Domain):</div>
+                          <ul style={{ margin: 0, paddingLeft: 24 }}>
+                            {whatHeKnows.map((k, i) => <li key={i} style={{ marginBottom: 6, lineHeight: 1.8 }}>{k}</li>)}
+                          </ul>
+                        </div>
+                      )}
+                      {certifications.length > 0 && (
+                        <div style={{ marginBottom: 24 }}>
+                          <div style={{ fontWeight: 700, fontSize: 17, color: '#111827', marginBottom: 8 }}>📜 Certifications &amp; Completed Work:</div>
+                          <ul style={{ margin: 0, paddingLeft: 24 }}>
+                            {certifications.map((item, i) => <li key={i} style={{ marginBottom: 6, lineHeight: 1.8 }}>{item}</li>)}
+                          </ul>
+                        </div>
+                      )}
+                      {(personal?.name || personal?.email || personal?.phone || personal?.location) && (
+                        <div style={{ marginBottom: 24, backgroundColor: '#f9fafb', padding: '16px 20px', borderRadius: 6, border: '1px solid #e5e7eb' }}>
+                          <div style={{ fontWeight: 700, fontSize: 17, color: '#111827', marginBottom: 8 }}>📇 Contact Information:</div>
+                          <div style={{ fontSize: 16, lineHeight: 1.85 }}>
+                            {personal.name && <div style={{ marginBottom: 4 }}><strong>Name:</strong> {personal.name}</div>}
+                            {personal.email && <div style={{ marginBottom: 4 }}><strong>Email:</strong> {personal.email}</div>}
+                            {personal.phone && <div style={{ marginBottom: 4 }}><strong>Phone:</strong> {personal.phone}</div>}
+                            {personal.location && <div style={{ marginBottom: 4 }}><strong>Location:</strong> {personal.location}</div>}
+                          </div>
+                        </div>
+                      )}
+                      {highlightLines.length > 0 && (
+                        <div style={{ marginBottom: 24, backgroundColor: '#f9fafb', padding: '16px 20px', borderRadius: 6, borderLeft: '4px solid #059669' }}>
+                          <div style={{ fontWeight: 700, fontSize: 17, color: '#065f46', marginBottom: 8 }}>✨ Key Highlights &amp; Experience:</div>
+                          <ul style={{ margin: 0, paddingLeft: 24 }}>
+                            {highlightLines.map((h, i) => <li key={i} style={{ marginBottom: 6, lineHeight: 1.8 }}>{h}</li>)}
+                          </ul>
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  {/* ── CERTIFICATE VIEW ── */}
+                  {isCert && (
+                    <>
+                      {documentSummary && (
+                        <div style={{ marginBottom: 24, backgroundColor: '#f8fafc', padding: '16px 20px', borderRadius: 6, borderLeft: '4px solid #0284c7' }}>
+                          <div style={{ fontWeight: 700, fontSize: 17, color: '#0369a1', marginBottom: 6 }}>📜 Credential Summary:</div>
+                          <div style={{ fontSize: 16, lineHeight: 1.85, color: '#334155' }}>{documentSummary}</div>
+                        </div>
+                      )}
+                      {personal?.name && (
+                        <div style={{ marginBottom: 20 }}>
+                          <div style={{ fontWeight: 700, fontSize: 17, color: '#111827' }}>👤 Awarded To:</div>
+                          <div style={{ fontSize: 16, color: '#374151' }}>{personal.name}</div>
+                        </div>
+                      )}
+                      {certifications.length > 0 && (
+                        <div style={{ marginBottom: 24 }}>
+                          <div style={{ fontWeight: 700, fontSize: 17, color: '#111827', marginBottom: 8 }}>📜 Certification Details:</div>
+                          <ul style={{ margin: 0, paddingLeft: 24 }}>
+                            {certifications.map((item, i) => <li key={i} style={{ marginBottom: 6, lineHeight: 1.8 }}>{item}</li>)}
+                          </ul>
+                        </div>
+                      )}
+                      {year && (
+                        <div style={{ marginBottom: 20 }}>
+                          <div style={{ fontWeight: 700, fontSize: 17, color: '#111827' }}>📅 Date / Year:</div>
+                          <div style={{ fontSize: 16, color: '#374151' }}>{year}</div>
+                        </div>
+                      )}
+                      {highlightLines.length > 0 && (
+                        <div style={{ marginBottom: 24, backgroundColor: '#f9fafb', padding: '16px 20px', borderRadius: 6, borderLeft: '4px solid #059669' }}>
+                          <div style={{ fontWeight: 700, fontSize: 17, color: '#065f46', marginBottom: 8 }}>✨ Verification Highlights:</div>
+                          <ul style={{ margin: 0, paddingLeft: 24 }}>
+                            {highlightLines.map((h, i) => <li key={i} style={{ marginBottom: 6, lineHeight: 1.8 }}>{h}</li>)}
+                          </ul>
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  {/* ── GENERAL / OTHER VIEW ── */}
+                  {!isBook && !isProject && !isPaper && !isPhoto && !isResume && !isCert && (
+                    <>
+                      {documentSummary && (
+                        <div style={{ marginBottom: 24, backgroundColor: '#f8fafc', padding: '16px 20px', borderRadius: 6, borderLeft: '4px solid #0284c7' }}>
+                          <div style={{ fontWeight: 700, fontSize: 17, color: '#0369a1', marginBottom: 6 }}>📝 Document Summary:</div>
+                          <div style={{ fontSize: 16, lineHeight: 1.85, color: '#334155' }}>{documentSummary}</div>
+                        </div>
+                      )}
+                      {conceptLines.length > 0 && (
+                        <div style={{ marginBottom: 24, backgroundColor: '#eff6ff', padding: '16px 20px', borderRadius: 6, borderLeft: '4px solid #3b82f6' }}>
+                          <div style={{ fontWeight: 700, fontSize: 17, color: '#1d4ed8', marginBottom: 8 }}>💡 Key Concepts:</div>
+                          <ul style={{ margin: 0, paddingLeft: 24 }}>
+                            {conceptLines.map((c, i) => <li key={i} style={{ marginBottom: 6, lineHeight: 1.8 }}>{c}</li>)}
+                          </ul>
+                        </div>
+                      )}
+                      {highlightLines.length > 0 && (
+                        <div style={{ marginBottom: 24, backgroundColor: '#f9fafb', padding: '16px 20px', borderRadius: 6, borderLeft: '4px solid #059669' }}>
+                          <div style={{ fontWeight: 700, fontSize: 17, color: '#065f46', marginBottom: 8 }}>✨ Key Highlights:</div>
+                          <ul style={{ margin: 0, paddingLeft: 24 }}>
+                            {highlightLines.map((h, i) => <li key={i} style={{ marginBottom: 6, lineHeight: 1.8 }}>{h}</li>)}
+                          </ul>
+                        </div>
+                      )}
+                      {authors.length > 0 && (
+                        <div style={{ marginBottom: 20 }}>
+                          <div style={{ fontWeight: 700, fontSize: 17, color: '#111827', marginBottom: 6 }}>✍️ Authors / Signatories:</div>
+                          <ul style={{ margin: 0, paddingLeft: 24 }}>
+                            {authors.map((a, i) => <li key={i} style={{ marginBottom: 4 }}>{a}</li>)}
+                          </ul>
+                        </div>
+                      )}
+                      {year && (
+                        <div style={{ marginBottom: 20 }}>
+                          <div style={{ fontWeight: 700, fontSize: 17, color: '#111827' }}>📅 Year:</div>
+                          <div style={{ fontSize: 16, color: '#374151' }}>{year}</div>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </div>
+              )
+            })()}
+
+            <div style={{
+              display: 'flex', justifyContent: 'flex-end', marginTop: 28,
+              borderTop: '1px solid #e5e7eb', paddingTop: 16
+            }}>
+              <button
+                onClick={() => setSelectedDoc(null)}
+                style={{
+                  padding: '8px 24px', backgroundColor: '#374151', color: '#ffffff',
+                  border: 'none', borderRadius: 6, fontSize: 15, cursor: 'pointer',
+                  fontFamily: '"Times New Roman", Times, serif'
+                }}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}

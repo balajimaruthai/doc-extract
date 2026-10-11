@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: docextract
+    runtime: docker
+    plan: free
+    region: oregon
+    envVars:
+      - key: DOCEXTRACT_HOST
+        value: 0.0.0.0

@@ -1,0 +1,43 @@
+# Large AI Models (exceeds GitHub 100MB file limit)
+models/**/*.gguf
+*.gguf
+
+# Dependencies
+node_modules/
+app/frontend/node_modules/
+.venv/
+venv/
+env/
+
+# Python cache & build
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+build/
+dist/
+*.spec
+*.egg-info/
+
+# Local user data, uploads and database
+data/*.db
+data/uploads/*
+!data/uploads/.gitkeep
+data/exports/*
+!data/exports/.gitkeep
+data/logs/*
+!data/logs/.gitkeep
+
+# Executables & local binary tools
+cloudflared.exe
+
+# Logs
+*.log
+desktop_app.log
+launcher.log
+
+# System files
+Thumbs.db
+.DS_Store
+.idea/
+.vscode/

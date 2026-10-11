@@ -1,0 +1,59 @@
+<|user|>
+You are an expert document parser. Extract structured facts from the following resume text into a strict JSON object.
+
+Extract into this exact JSON structure:
+{
+  "personal": {
+    "name": "Full Name or null",
+    "email": "email address or null",
+    "phone": "phone number or null",
+    "location": "location or null",
+    "date_of_birth": null,
+    "linkedin": null
+  },
+  "education": [
+    {
+      "degree": "Degree name",
+      "specialization": null,
+      "institution": "School or College name",
+      "graduation_date": "Year or Date",
+      "percentage": null,
+      "cgpa": null
+    }
+  ],
+  "experience": [
+    {
+      "company": "Company name",
+      "designation": "Role / Title",
+      "start_date": "Start date",
+      "end_date": "End date or null",
+      "is_current": false,
+      "responsibilities": ["Task 1", "Task 2"]
+    }
+  ],
+  "skills": {
+    "programming_languages": ["Python", "..."],
+    "frameworks": ["FastAPI", "..."],
+    "tools": ["Git", "..."],
+    "databases": ["SQL", "..."],
+    "cloud": [],
+    "domain_skills": [],
+    "soft_skills": []
+  },
+  "certifications": [],
+  "projects": [],
+  "achievements": [],
+  "professional_summary": null
+}
+
+RULES:
+- ONLY output a valid JSON object starting with { and ending with }.
+- Do NOT wrap the output in markdown backticks or explanations.
+- Extract ONLY what is explicitly mentioned in the text.
+
+DOCUMENT CONTENT:
+"""
+{document_text}
+"""
+<|end|>
+<|assistant|>

@@ -1,0 +1,55 @@
+# ============================================================
+# Offline Document Intelligence App — Python Backend
+# All packages must be installable offline after initial download
+# ============================================================
+
+# Web framework
+fastapi==0.141.1
+uvicorn[standard]==0.52.1
+
+# HTTP client (localhost only — no external calls)
+httpx==0.28.1
+
+# Data validation
+pydantic==2.12.4
+pydantic-settings==2.12.0
+
+# Database
+aiosqlite==0.22.1
+alembic==1.16.1
+
+# Document processing
+PyMuPDF==1.28.0          # PDF text extraction and rendering
+python-docx==1.2.0       # DOCX processing
+
+# Image processing
+Pillow==12.3.0
+opencv-python-headless>=4.8.0.76
+
+# OCR
+pytesseract==0.3.13      # Tesseract wrapper (Tesseract binary installed separately)
+
+# Local LLM (installed separately with CUDA wheel)
+# llama-cpp-python        # Installed via: pip install llama-cpp-python --extra-index-url ...
+
+# Hardware detection
+psutil==7.0.0
+py-cpuinfo==9.0.0
+
+# Export
+reportlab==4.3.1         # Offline PDF generation
+
+# File handling
+python-multipart==0.0.20  # FastAPI file uploads
+aiofiles==24.1.0
+
+# Hashing / security
+# hashlib — stdlib (no install needed)
+
+# Async utilities
+anyio==4.9.0
+
+# Development / testing only
+pytest==8.3.5
+pytest-asyncio==0.26.0
+pytest-cov==6.1.0

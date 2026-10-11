@@ -1,0 +1,29 @@
+[package]
+name = "doc-extract"
+version = "1.0.0"
+description = "DocExtract — Offline Document Intelligence Desktop App"
+authors = ["DocExtract"]
+license = "MIT"
+repository = ""
+edition = "2021"
+rust-version = "1.77"
+
+[lib]
+name = "app_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+serde_json = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+log = "0.4"
+tauri = { version = "2", features = [] }
+# reqwest for backend health check (tokio async)
+reqwest = { version = "0.12", features = ["json"] }
+tokio = { version = "1", features = ["full"] }
+
+[features]
+# This feature is used for production builds or when `devPath` points to the filesystem
+custom-protocol = ["tauri/custom-protocol"]

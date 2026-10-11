@@ -1,0 +1,12 @@
+services:
+  docextract:
+    build: .
+    ports:
+      - "37240:37240"
+    volumes:
+      - ./data:/app/data
+      - ./models:/app/models
+    environment:
+      - DOCEXTRACT_HOST=0.0.0.0
+      - PORT=37240
+    restart: unless-stopped
