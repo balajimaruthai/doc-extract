@@ -15,7 +15,7 @@ COPY app/backend/requirements.txt ./app/backend/
 RUN pip install --no-cache-dir -r ./app/backend/requirements.txt
 
 COPY app/backend/ ./app/backend/
-COPY app/frontend/dist/ ./app/frontend/dist/
+COPY app/frontend/dist ./app/frontend/dist/
 
 RUN mkdir -p data/uploads data/exports data/logs models/small models/medium models/large
 
