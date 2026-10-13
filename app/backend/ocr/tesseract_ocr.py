@@ -176,12 +176,36 @@ def run_ocr(
                 error="No text detected on this page",
             )
 
-        # Build full text from words (preserve line structure)
-        full_text = pytesseract.image_to_string(
-            pil_image,
-            lang=lang,
-            config="--psm 3 --oem 3",
-        )
+        # Build full text directly from OCR data boxes (eliminates redundant 2nd Tesseract process)
+        lines = []
+        current_line = []
+        prev_line_key = None
+
+        for i in range(n_boxes):
+            word = data["text"][i].strip()
+            if not word:
+                continue
+            line_key = (data["block_num"][i], data["par_num"][i], data["line_num"][i])
+            if prev_line_key is not None and line_key != prev_line_key:
+                if current_line:
+                    lines.append(" ".join(current_line))
+                    current_line = []
+                if line_key[0] != prev_line_key[0] or line_key[1] != prev_line_key[1]:
+                    lines.append("")  # paragraph separator
+            current_line.append(word)
+            prev_line_key = line_key
+
+        if current_line:
+            lines.append(" ".join(current_line))
+
+        full_text = "\n".join(lines).strip()
+        if not full_text:
+            # Fallback only if box reconstruction was unexpectedly empty
+            full_text = pytesseract.image_to_string(
+                pil_image,
+                lang=lang,
+                config="--psm 3 --oem 3",
+            )
 
         mean_conf = float(np.mean(word_confidences))
         low_conf_count = sum(1 for c in word_confidences if c < confidence_threshold)

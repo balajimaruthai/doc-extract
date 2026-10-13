@@ -13,8 +13,9 @@ from PIL import Image
 
 logger = logging.getLogger(__name__)
 
-TARGET_DPI = 300
-TARGET_SHORT_EDGE_PX = 1200   # Minimum short-edge pixels for good OCR
+TARGET_DPI = 180
+TARGET_SHORT_EDGE_PX = 900    # Minimum short-edge pixels for good OCR
+MAX_LONG_EDGE_PX = 1600       # Cap oversized images to prevent slow OCR latency
 
 
 @dataclass
@@ -36,9 +37,9 @@ def preprocess_for_ocr(
 
     Pipeline (applied selectively based on image quality):
     1. Convert to grayscale
-    2. Resize to minimum DPI target
-    3. Denoise (light)
-    4. Deskew
+    2. Normalize resolution (scale down if > 1600px, scale up if < 900px)
+    3. Denoise (fast Gaussian if aggressive)
+    4. Deskew (if aggressive)
     5. Adaptive threshold (for poor contrast)
 
     Args:
@@ -60,10 +61,19 @@ def preprocess_for_ocr(
     else:
         gray = img.copy()
 
-    # Step 2: Resize if too small
+    # Step 2: Normalize dimensions for fast OCR (< 500ms)
     h, w = gray.shape[:2]
+    long_edge = max(h, w)
     short_edge = min(h, w)
-    if short_edge < TARGET_SHORT_EDGE_PX:
+
+    if long_edge > MAX_LONG_EDGE_PX:
+        scale = MAX_LONG_EDGE_PX / long_edge
+        new_w = int(w * scale)
+        new_h = int(h * scale)
+        gray = cv2.resize(gray, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        was_resized = True
+        logger.debug(f"Downscaled oversized image from {w}x{h} to {new_w}x{new_h}")
+    elif short_edge < TARGET_SHORT_EDGE_PX:
         scale = TARGET_SHORT_EDGE_PX / short_edge
         new_w = int(w * scale)
         new_h = int(h * scale)
@@ -71,32 +81,29 @@ def preprocess_for_ocr(
         was_resized = True
         logger.debug(f"Resized from {w}x{h} to {new_w}x{new_h}")
 
-    # Step 3: Light denoising
-    noise_level = _estimate_noise(gray)
-    if noise_level > 15 or aggressive:
-        gray = cv2.fastNlMeansDenoising(gray, h=10, templateWindowSize=7, searchWindowSize=21)
+    # Step 3: Fast smoothing (Gaussian blur instead of slow non-local means)
+    if aggressive:
+        gray = cv2.GaussianBlur(gray, (3, 3), 0)
         was_denoised = True
-        logger.debug(f"Denoised (noise level: {noise_level:.1f})")
 
-    # Step 4: Deskew
-    skew_angle = _estimate_skew(gray)
-    if abs(skew_angle) > 0.5:  # Only deskew if meaningful
-        gray = _deskew(gray, skew_angle)
-        was_deskewed = True
-        logger.debug(f"Deskewed by {skew_angle:.2f}°")
+    # Step 4: Fast Deskew (only run Hough transform when aggressive=True)
+    if aggressive:
+        skew_angle = _estimate_skew(gray)
+        if abs(skew_angle) > 1.0:
+            gray = _deskew(gray, skew_angle)
+            was_deskewed = True
 
     # Step 5: Adaptive thresholding for low-contrast / uneven lighting
     contrast = _estimate_contrast(gray)
-    if contrast < 60 or aggressive:
+    if contrast < 45 or aggressive:
         gray = cv2.adaptiveThreshold(
             gray, 255,
             cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
             cv2.THRESH_BINARY,
-            blockSize=31,
+            blockSize=25,
             C=10
         )
         was_thresholded = True
-        logger.debug(f"Applied adaptive threshold (contrast: {contrast:.1f})")
 
     return PreprocessResult(
         image_array=gray,

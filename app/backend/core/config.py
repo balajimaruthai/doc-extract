@@ -38,8 +38,12 @@ class Settings(BaseSettings):
     # OCR
     TESSERACT_CMD: str = "tesseract" if os.name != "nt" else r"C:\Program Files\Tesseract-OCR\tesseract.exe"
     TESSERACT_LANG: str = "eng"
-    OCR_DPI: int = 300
+    OCR_DPI: int = 180                     # Optimized for speed and precision (sub-2s target)
     OCR_CONFIDENCE_THRESHOLD: float = 60.0
+
+    # Processing & Performance Optimization
+    FAST_PROCESSING: bool = True           # Sub-2-second deterministic extraction SLA
+    MAX_VIDEO_SAMPLE_FRAMES: int = 3       # Sample 3 keyframes for fast video OCR
 
     # LLM
     LLM_PROVIDER: str = "llama_cpp"        # "llama_cpp" or "ollama"
@@ -55,7 +59,7 @@ class Settings(BaseSettings):
     OLLAMA_BASE_URL: str = "http://127.0.0.1:11434"  # Localhost only if Ollama used
     OLLAMA_MODEL: str = ""
 
-    # Processing
+    # Processing limits
     MAX_FILE_SIZE_MB: int = 100
     MAX_PAGES_PER_DOC: int = 50
     NATIVE_TEXT_MIN_CHARS_PER_PAGE: int = 50  # Below this → use OCR

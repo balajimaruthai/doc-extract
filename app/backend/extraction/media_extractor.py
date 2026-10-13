@@ -127,14 +127,16 @@ def extract_audio(file_path: Path) -> AudioExtractionResult:
         )
 
 
-def extract_video(file_path: Path, max_sample_frames: int = 8) -> VideoExtractionResult:
+def extract_video(file_path: Path, max_sample_frames: int = 3) -> VideoExtractionResult:
     """
     Extract visual intelligence from video files using OpenCV.
-    Samples keyframes across the timeline and runs OCR on frames containing text/slides/labels.
+    Samples keyframes across the timeline and runs fast OCR on frames containing text/slides/labels.
+    Optimized for sub-2-second turnaround.
     """
     path = Path(file_path)
     try:
         import cv2
+        import numpy as np
         from ocr.preprocessor import preprocess_for_ocr
         from ocr.tesseract_ocr import run_ocr
 
@@ -156,7 +158,7 @@ def extract_video(file_path: Path, max_sample_frames: int = 8) -> VideoExtractio
                 error="Video contains 0 readable frames"
             )
 
-        # Sample frames evenly across video duration
+        # Sample keyframes evenly across video timeline
         step = max(1, total_frames // max_sample_frames)
         keyframes: list[VideoKeyframe] = []
         collected_text_pieces: list[str] = []
@@ -170,18 +172,28 @@ def extract_video(file_path: Path, max_sample_frames: int = 8) -> VideoExtractio
 
             timestamp = frame_idx / fps if fps > 0 else 0.0
 
-            # Run OCR on the keyframe
+            # Scale frame for rapid OCR processing if oversized
+            fh, fw = frame.shape[:2]
+            if max(fh, fw) > 1080:
+                scale = 1080 / max(fh, fw)
+                frame = cv2.resize(frame, (int(fw * scale), int(fh * scale)), interpolation=cv2.INTER_AREA)
+
+            # Skip OCR if frame is solid/blank (low variance)
+            gray_small = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY) if len(frame.shape) == 3 else frame
+            has_contrast = float(np.std(gray_small)) > 18.0
+
             ocr_text = ""
             conf = 0.0
-            try:
-                prepped = preprocess_for_ocr(frame)
-                ocr_res = run_ocr(prepped.image_array, page_number=len(keyframes) + 1)
-                if ocr_res and ocr_res.full_text.strip():
-                    ocr_text = ocr_res.full_text.strip()
-                    conf = ocr_res.mean_confidence
-                    collected_text_pieces.append(f"[Timestamp {timestamp:.1f}s]: {ocr_text}")
-            except Exception as ocr_err:
-                logger.debug(f"Frame OCR error at frame {frame_idx}: {ocr_err}")
+            if has_contrast:
+                try:
+                    prepped = preprocess_for_ocr(frame)
+                    ocr_res = run_ocr(prepped.image_array, page_number=len(keyframes) + 1)
+                    if ocr_res and ocr_res.full_text.strip():
+                        ocr_text = ocr_res.full_text.strip()
+                        conf = ocr_res.mean_confidence
+                        collected_text_pieces.append(f"[Timestamp {timestamp:.1f}s]: {ocr_text}")
+                except Exception as ocr_err:
+                    logger.debug(f"Frame OCR error at frame {frame_idx}: {ocr_err}")
 
             keyframes.append(VideoKeyframe(
                 frame_number=frame_idx,

@@ -35,7 +35,7 @@ class PDFExtractionResult:
     error: Optional[str] = None
 
 
-def extract_pdf(file_path: Path, ocr_dpi: int = 300) -> PDFExtractionResult:
+def extract_pdf(file_path: Path, ocr_dpi: int = 180) -> PDFExtractionResult:
     """
     Extract text from a PDF file.
     For pages with sufficient native text: return text directly.
@@ -43,7 +43,7 @@ def extract_pdf(file_path: Path, ocr_dpi: int = 300) -> PDFExtractionResult:
 
     Args:
         file_path: Path to the PDF file
-        ocr_dpi: DPI for rendering pages that need OCR
+        ocr_dpi: DPI for rendering pages that need OCR (default 180 for sub-2s speed)
     """
     pages: list[PageText] = []
     is_password_protected = False
@@ -160,9 +160,9 @@ def _clean_native_text(text: str) -> str:
     return text.strip()
 
 
-def _render_page_to_image(page: fitz.Page, dpi: int = 300) -> bytes:
+def _render_page_to_image(page: fitz.Page, dpi: int = 180) -> bytes:
     """
-    Render a PDF page to PNG bytes at the specified DPI.
+    Render a PDF page to PNG bytes at the specified DPI (default 180 for sub-2s speed).
     Used when native text extraction yields insufficient content.
     """
     zoom = dpi / 72.0  # 72 DPI is the base PDF unit

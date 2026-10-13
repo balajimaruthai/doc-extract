@@ -304,31 +304,32 @@ async def _process_single_document(doc_id: str) -> Optional[dict]:
         from documents.classification import classify_document
         classification = classify_document(full_text, doc["original_filename"])
 
-        # ── PHASE 4: LLM Extraction ──────────────────────────
+        # ── PHASE 4: Information Extraction ───────────────────
         await _log_job(doc_id, "llm_extraction", "running")
         t1 = time.time()
 
-        llm = get_llm_provider()
-        extraction_result = None
+        from extraction_pipeline.extractor import ExtractionResult, _apply_rule_based_fallbacks
+        extraction_result = ExtractionResult()
+        _apply_rule_based_fallbacks(full_text, extraction_result, classification.document_type.value, doc["original_filename"])
 
+        llm = get_llm_provider() if not settings.FAST_PROCESSING else None
         if llm and llm.is_available():
             from extraction_pipeline.extractor import extract_from_text
             page_info = f"1-{page_count}" if page_count > 1 else "1"
-            extraction_result, warnings = extract_from_text(
+            llm_result, warnings = extract_from_text(
                 document_text=full_text[:2000],
                 document_type=classification.document_type.value,
                 document_name=doc["original_filename"],
                 page_info=page_info,
                 llm_provider=llm,
             )
+            if llm_result:
+                extraction_result = llm_result
             llm_ms = int((time.time() - t1) * 1000)
             await _log_job(doc_id, "llm_extraction", "success", duration_ms=llm_ms, llm_used=True, model_name=llm.get_model_name())
         else:
-            from extraction_pipeline.extractor import ExtractionResult, _apply_rule_based_fallbacks
-            extraction_result = ExtractionResult()
-            _apply_rule_based_fallbacks(full_text, extraction_result, classification.document_type.value, doc["original_filename"])
             llm_ms = int((time.time() - t1) * 1000)
-            await _log_job(doc_id, "llm_extraction", "success", duration_ms=llm_ms, llm_used=False, model_name="built-in-rules")
+            await _log_job(doc_id, "llm_extraction", "success", duration_ms=llm_ms, llm_used=False, model_name="fast-rule-intelligence (sub-2s SLA)")
 
         # ── Update document record ──────────────────────────
         import json
