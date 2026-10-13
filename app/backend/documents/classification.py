@@ -25,10 +25,14 @@ class DocumentType(str, Enum):
     TRAINING_CERTIFICATE = "training_certificate"
     ACHIEVEMENT_CERTIFICATE = "achievement_certificate"
     PAYSLIP = "payslip"
+    INVOICE = "invoice"
+    BILL = "bill"
     BOOK = "book"
     PROJECT_REPORT = "project_report"
     RESEARCH_PAPER = "research_paper"
     PHOTO_DOCUMENT = "photo_document"
+    AUDIO = "audio"
+    VIDEO = "video"
     OTHER = "other"
     NEEDS_REVIEW = "needs_review"
 
@@ -89,10 +93,16 @@ TEXT_PATTERNS: list[tuple[re.Pattern, DocumentType, int]] = [
     (re.compile(r"\bSGPA\b", re.I), DocumentType.MARKSHEET, 6),
 
     # Experience Letter
-    (re.compile(r"\bexperience\s+(letter|certificate)\b", re.I), DocumentType.EXPERIENCE_LETTER, 14),
-    (re.compile(r"\bto\s+whomsoever?\s+it\s+may\s+concern\b", re.I), DocumentType.EXPERIENCE_LETTER, 8),
-    (re.compile(r"\b(worked|employed|served)\s+(with|at|in)\b.{0,200}\b(from|since)\b", re.I | re.S), DocumentType.EXPERIENCE_LETTER, 8),
-    (re.compile(r"\brelieving\s+letter\b", re.I), DocumentType.EXPERIENCE_LETTER, 12),
+    (re.compile(r"\bexperience\s+(letter|certificate)\b", re.I), DocumentType.EXPERIENCE_LETTER, 28),
+    (re.compile(r"\bto\s+whomsoever?\s+it\s+may\s+concern\b", re.I), DocumentType.EXPERIENCE_LETTER, 18),
+    (re.compile(r"\b(worked|employed|served)\s+(with|at|in)\b.{0,200}\b(from|since)\b", re.I | re.S), DocumentType.EXPERIENCE_LETTER, 18),
+    (re.compile(r"\brelieving\s+letter\b", re.I), DocumentType.EXPERIENCE_LETTER, 24),
+
+    # Corporate Invoice / Billing / Payroll Statement
+    (re.compile(r"\b(invoice|tax\s+invoice|bill\s+to|invoice\s*#|invoice\s+no|remit\s+payment\s+to)\b", re.I), DocumentType.INVOICE, 25),
+    (re.compile(r"\b(total\s+amount\s+due|amount\s+due|balance\s+due|gross\s+wages|total\s+gross|wire\s+routing|routing\s+number)\b", re.I), DocumentType.INVOICE, 25),
+    (re.compile(r"\b(terms\s*:\s*dd\s+net|net\s+\d+\s+days?|due\s+date|payment\s+terms)\b", re.I), DocumentType.INVOICE, 20),
+    (re.compile(r"\b(payroll\s+charges|employer\s+fringes|total\s+fringe|payroll\s+total)\b", re.I), DocumentType.INVOICE, 22),
 
     # Offer Letter
     (re.compile(r"\boffer\s+letter\b", re.I), DocumentType.OFFER_LETTER, 14),
@@ -113,12 +123,19 @@ TEXT_PATTERNS: list[tuple[re.Pattern, DocumentType, int]] = [
     (re.compile(r"\b(certified|certification)\b.{0,100}\b(professional|associate|expert)\b", re.I | re.S), DocumentType.PROFESSIONAL_CERTIFICATE, 10),
     (re.compile(r"\baws\s+certified|microsoft\s+certified|google\s+cloud\s+certified|cisco\s+certified\b", re.I), DocumentType.PROFESSIONAL_CERTIFICATE, 12),
     (re.compile(r"\btraining\s+(certificate|program|completion)\b", re.I), DocumentType.TRAINING_CERTIFICATE, 10),
-    (re.compile(r"\b(award|achievement|recognition|excellence)\b.{0,100}\bcertificate\b", re.I | re.S), DocumentType.ACHIEVEMENT_CERTIFICATE, 10),
+    # Universal Certificate patterns (require specific non-work certificate context)
+    (re.compile(r"\b(certificate\s+of\s+(completion|achievement|appreciation|participation|excellence|merit|attendance|recognition))\b", re.I), DocumentType.ACHIEVEMENT_CERTIFICATE, 25),
+    (re.compile(r"\b(is\s+hereby\s+awarded\s+to|presented\s+to|certifies\s+that)\b", re.I), DocumentType.PROFESSIONAL_CERTIFICATE, 20),
+    (re.compile(r"\bthis\s+is\s+to\s+certify\s+that\b(?!.*worked)", re.I | re.S), DocumentType.PROFESSIONAL_CERTIFICATE, 15),
+    (re.compile(r"\b(successfully\s+completed\s+(the\s+course|training|internship|program))\b", re.I), DocumentType.TRAINING_CERTIFICATE, 20),
+    (re.compile(r"\b(certificate\s+id|credential\s+id|verification\s+code|certificate\s+no|cert\s*#)\b", re.I), DocumentType.PROFESSIONAL_CERTIFICATE, 15),
+    (re.compile(r"\b(udemy|coursera|edx|linkedin\s+learning|nptel|scaler|great\s+learning|simplilearn)\b", re.I), DocumentType.PROFESSIONAL_CERTIFICATE, 18),
 ]
 
 # Filename hints
 FILENAME_HINTS: list[tuple[re.Pattern, DocumentType, int]] = [
     (re.compile(r"\b(resume|cv|biodata)\b", re.I), DocumentType.RESUME, 30),
+    (re.compile(r"\b(invoice|bill|receipt|statement|payroll)\b", re.I), DocumentType.INVOICE, 30),
     (re.compile(r"\b(book|textbook|handbook|manual|guide|ebook|novel)\b", re.I), DocumentType.BOOK, 25),
     (re.compile(r"\b(project|report|capstone|thesis|synopsis)\b", re.I), DocumentType.PROJECT_REPORT, 25),
     (re.compile(r"\b(paper|ieee|icccnt|conference|journal|publication)\b", re.I), DocumentType.RESEARCH_PAPER, 25),
@@ -128,7 +145,7 @@ FILENAME_HINTS: list[tuple[re.Pattern, DocumentType, int]] = [
     (re.compile(r"\boffer\b", re.I), DocumentType.OFFER_LETTER, 18),
     (re.compile(r"\bappointment\b", re.I), DocumentType.APPOINTMENT_LETTER, 18),
     (re.compile(r"\binternship\b", re.I), DocumentType.INTERNSHIP_CERTIFICATE, 18),
-    (re.compile(r"\bcertif\b", re.I), DocumentType.PROFESSIONAL_CERTIFICATE, 18),
+    (re.compile(r"\b(certif|course_complete|completion|award|credential)\b", re.I), DocumentType.PROFESSIONAL_CERTIFICATE, 25),
     (re.compile(r"\b(scan|photo|screenshot|img|snapshot)\b", re.I), DocumentType.PHOTO_DOCUMENT, 18),
 ]
 
@@ -161,15 +178,45 @@ def classify_document(
             scores[doc_type] = scores.get(doc_type, 0) + weight
 
     ext = original_filename.lower().rsplit(".", 1)[-1] if "." in original_filename else ""
+    if ext in ("mp3", "wav", "m4a", "aac", "ogg"):
+        return ClassificationResult(
+            document_type=DocumentType.AUDIO,
+            confidence=ConfidenceLevel.HIGH,
+            method="rules",
+            reasoning=f"Audio media container (.{ext}).",
+        )
+    if ext in ("mp4", "mov", "avi", "mkv", "webm"):
+        return ClassificationResult(
+            document_type=DocumentType.VIDEO,
+            confidence=ConfidenceLevel.HIGH,
+            method="rules",
+            reasoning=f"Video media container (.{ext}).",
+        )
+
     if ext in ("png", "jpg", "jpeg", "webp", "bmp"):
-        # If no explicit resume or paper or book signal, classify as photo/scanned document
-        if not scores or scores.get(DocumentType.PHOTO_DOCUMENT, 0) > 0 or max(scores.values()) < 15:
-            return ClassificationResult(
-                document_type=DocumentType.PHOTO_DOCUMENT,
-                confidence=ConfidenceLevel.HIGH if scores else ConfidenceLevel.MEDIUM,
-                method="rules",
-                reasoning="Classified as photo/scanned document based on visual image container.",
-            )
+        # Check if there are strong signals for specific types (like certificate, marksheet, resume)
+        certificate_types = {
+            DocumentType.DEGREE_CERTIFICATE,
+            DocumentType.PROFESSIONAL_CERTIFICATE,
+            DocumentType.TRAINING_CERTIFICATE,
+            DocumentType.ACHIEVEMENT_CERTIFICATE,
+            DocumentType.INTERNSHIP_CERTIFICATE,
+            DocumentType.MARKSHEET,
+            DocumentType.EXPERIENCE_LETTER,
+            DocumentType.RESUME,
+            DocumentType.CV,
+        }
+        has_specific_signal = any(scores.get(t, 0) >= 12 for t in certificate_types)
+
+        if not has_specific_signal:
+            # If no strong certificate/resume signal, classify as photo/scanned document
+            if not scores or scores.get(DocumentType.PHOTO_DOCUMENT, 0) > 0 or max(scores.values()) < 12:
+                return ClassificationResult(
+                    document_type=DocumentType.PHOTO_DOCUMENT,
+                    confidence=ConfidenceLevel.HIGH if scores else ConfidenceLevel.MEDIUM,
+                    method="rules",
+                    reasoning="Classified as photo/scanned document based on visual image container.",
+                )
 
     if not scores:
         return ClassificationResult(

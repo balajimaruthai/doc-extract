@@ -241,7 +241,7 @@ async def _process_single_document(doc_id: str) -> Optional[dict]:
             page_count = 1
             ocr_used = False
 
-        elif file_type in ("jpg", "jpeg", "png"):
+        elif file_type in ("jpg", "jpeg", "png", "webp"):
             from ocr.preprocessor import preprocess_for_ocr
             from ocr.tesseract_ocr import run_ocr_on_image_file
             ocr_result = run_ocr_on_image_file(file_path, page_number=1)
@@ -249,6 +249,35 @@ async def _process_single_document(doc_id: str) -> Optional[dict]:
             has_native = False
             page_count = 1
             ocr_used = True
+
+        elif file_type in ("wav", "mp3", "m4a", "aac", "ogg"):
+            from extraction.media_extractor import extract_audio
+            audio_result = extract_audio(file_path)
+            transcript_text = audio_result.transcript or f"Audio file: {doc['original_filename']} ({audio_result.duration_seconds:.1f}s)"
+            pages_text = [{"page_number": 1, "text": transcript_text, "method": "stt", "ocr_confidence": 90.0}]
+            has_native = True
+            page_count = 1
+            ocr_used = False
+
+        elif file_type in ("mp4", "mov", "avi", "mkv", "webm"):
+            from extraction.media_extractor import extract_video
+            video_result = extract_video(file_path)
+            combined = video_result.combined_visual_text or ""
+            if video_result.transcript:
+                combined = f"Audio Transcript:\n{video_result.transcript}\n\nVisual Keyframe Text:\n{combined}"
+            if not combined.strip():
+                combined = f"Video file: {doc['original_filename']} ({video_result.duration_seconds:.1f}s, {video_result.sampled_frame_count} keyframes sampled)"
+            pages_text = [{"page_number": 1, "text": combined, "method": "video_analysis", "ocr_confidence": 85.0}]
+            has_native = False
+            page_count = max(1, video_result.sampled_frame_count)
+            ocr_used = True
+
+        elif file_type == "txt":
+            raw_txt = file_path.read_text(encoding="utf-8", errors="ignore")
+            pages_text = [{"page_number": 1, "text": raw_txt, "method": "native", "ocr_confidence": None}]
+            has_native = True
+            page_count = 1
+            ocr_used = False
         else:
             await _mark_failed(doc_id, f"Unsupported file type: {file_type}")
             return None
@@ -347,6 +376,33 @@ async def _process_single_document(doc_id: str) -> Optional[dict]:
                 for exp in extraction_result.experience if (exp.company or exp.designation)
             ]
             if exp_lines: doc_meta["experience"] = exp_lines
+
+            # Certificate / Image specific metadata
+            if extraction_result.certificate_name: doc_meta["certificate_name"] = extraction_result.certificate_name
+            if extraction_result.issued_to: doc_meta["issued_to"] = extraction_result.issued_to
+            if extraction_result.issuing_organization: doc_meta["issuing_organization"] = extraction_result.issuing_organization
+            if extraction_result.issue_date: doc_meta["issue_date"] = extraction_result.issue_date
+            if extraction_result.credential_id: doc_meta["credential_id"] = extraction_result.credential_id
+            if extraction_result.certificate_type: doc_meta["certificate_type"] = extraction_result.certificate_type
+
+            # Corporate / Invoice / Billing specific metadata
+            if extraction_result.invoice_number: doc_meta["invoice_number"] = extraction_result.invoice_number
+            if extraction_result.invoice_date: doc_meta["invoice_date"] = extraction_result.invoice_date
+            if extraction_result.due_date: doc_meta["due_date"] = extraction_result.due_date
+            if extraction_result.payment_terms: doc_meta["payment_terms"] = extraction_result.payment_terms
+            if extraction_result.total_amount_due: doc_meta["total_amount_due"] = extraction_result.total_amount_due
+            if extraction_result.total_gross: doc_meta["total_gross"] = extraction_result.total_gross
+            if extraction_result.total_fringe: doc_meta["total_fringe"] = extraction_result.total_fringe
+            if extraction_result.payroll_total: doc_meta["payroll_total"] = extraction_result.payroll_total
+            if extraction_result.billed_to: doc_meta["billed_to"] = extraction_result.billed_to
+            if extraction_result.remit_to: doc_meta["remit_to"] = extraction_result.remit_to
+            if extraction_result.bank_name: doc_meta["bank_name"] = extraction_result.bank_name
+            if extraction_result.account_number: doc_meta["account_number"] = extraction_result.account_number
+            if extraction_result.routing_number: doc_meta["routing_number"] = extraction_result.routing_number
+            if extraction_result.po_number: doc_meta["po_number"] = extraction_result.po_number
+            if extraction_result.client_code: doc_meta["client_code"] = extraction_result.client_code
+            if extraction_result.contact_person: doc_meta["contact_person"] = extraction_result.contact_person
+            if extraction_result.line_items: doc_meta["line_items"] = extraction_result.line_items
 
         async with get_connection() as conn:
             await conn.execute(

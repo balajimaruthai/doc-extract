@@ -24,10 +24,21 @@ MAGIC_BYTES: dict[str, list[bytes]] = {
     "jpg": [b"\xff\xd8\xff"],
     "jpeg": [b"\xff\xd8\xff"],
     "png": [b"\x89PNG\r\n\x1a\n"],
+    "webp": [b"RIFF"],
+    "wav": [b"RIFF"],
+    "mp3": [b"ID3", b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"],
+    "mp4": [b"\x00\x00\x00\x18ftyp", b"\x00\x00\x00\x20ftyp", b"\x00\x00\x00\x1cftyp", b"\x00\x00\x00\x14ftyp"],
+    "mov": [b"\x00\x00\x00\x14ftypqt", b"\x00\x00\x00\x20ftypqt"],
+    "avi": [b"RIFF"],
+    "mkv": [b"\x1a\x45\xdf\xa3"],
+    "webm": [b"\x1a\x45\xdf\xa3"],
 }
 
-ALLOWED_EXTENSIONS = {"pdf", "docx", "doc", "jpg", "jpeg", "png"}
-MAX_FILE_SIZE_BYTES = 100 * 1024 * 1024  # 100 MB
+ALLOWED_EXTENSIONS = {
+    "pdf", "docx", "doc", "jpg", "jpeg", "png", "webp",
+    "wav", "mp3", "mp4", "mov", "avi", "mkv", "webm", "txt"
+}
+MAX_FILE_SIZE_BYTES = 500 * 1024 * 1024  # 500 MB (expanded for video/audio)
 
 
 class FileValidationError(Exception):
@@ -97,6 +108,15 @@ def validate_and_ingest(
         "jpg": {"jpg", "jpeg"},
         "jpeg": {"jpg", "jpeg"},
         "png": {"png"},
+        "webp": {"webp"},
+        "wav": {"wav"},
+        "mp3": {"mp3"},
+        "mp4": {"mp4"},
+        "mov": {"mov", "mp4"},
+        "avi": {"avi"},
+        "mkv": {"mkv", "webm"},
+        "webm": {"webm", "mkv"},
+        "txt": {"txt"},
     }
     allowed_detected = _EXT_TO_TYPE.get(suffix, {suffix})
     if detected_type not in allowed_detected:
@@ -142,6 +162,9 @@ def _detect_file_type(data: bytes, claimed_extension: str) -> Optional[str]:
     Detect actual file type from magic bytes.
     Returns the detected type, or None if it doesn't match the claimed extension.
     """
+    if claimed_extension == "txt":
+        return "txt"
+
     header = data[:16]
 
     # Check each type
@@ -152,20 +175,35 @@ def _detect_file_type(data: bytes, claimed_extension: str) -> Optional[str]:
 
                 # DOCX/DOC disambiguation: both are PK (ZIP) magic
                 # DOCX is a ZIP. DOC is OLE2.
-                # If extension says docx but magic is ZIP → ok
-                # If extension says doc but magic is OLE2 → ok
                 if detected == "docx" and claimed_extension == "docx":
                     return "docx"
                 elif detected == "docx" and claimed_extension == "doc":
-                    # ZIP magic but claimed doc — could be docx renamed to doc
-                    # Accept it as docx
                     return "docx"
                 elif detected == "doc":
                     return "doc"
                 elif detected in ("jpg", "jpeg"):
                     return "jpg"
-                elif detected in ("pdf", "png"):
+                elif detected in ("pdf", "png", "webp", "wav", "mp3", "mp4", "mov", "avi", "mkv", "webm"):
                     return detected
+
+    # Fallback for video containers with ftyp at offset 4
+    if len(data) >= 8 and data[4:8] == b"ftyp":
+        if claimed_extension in ("mp4", "mov"):
+            return claimed_extension
+
+    # Fallback for RIFF containers (WAV, WEBP, AVI)
+    if header.startswith(b"RIFF") and len(data) >= 12:
+        tag = data[8:12]
+        if tag == b"WAVE":
+            return "wav"
+        elif tag == b"WEBP":
+            return "webp"
+        elif tag == b"AVI ":
+            return "avi"
+
+    # Permissive fallback if claimed extension is audio/video
+    if claimed_extension in ("mp3", "wav", "mp4", "mov", "avi", "mkv", "webm"):
+        return claimed_extension
 
     return None
 

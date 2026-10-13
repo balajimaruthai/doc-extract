@@ -144,6 +144,33 @@ class ExtractionResult(BaseModel):
     certifications_done: list[str] = Field(default_factory=list)
     document_summary: Optional[str] = None
 
+    # Certificate / Image document specific fields
+    certificate_name: Optional[str] = None        # e.g. "Certificate of Completion"
+    issued_to: Optional[str] = None               # Awardee / recipient name
+    issuing_organization: Optional[str] = None    # Issuing body / institution
+    issue_date: Optional[str] = None              # Date on the certificate
+    credential_id: Optional[str] = None           # Credential / certificate ID if present
+    certificate_type: Optional[str] = None        # e.g. "Professional", "Achievement", "Training"
+
+    # Corporate / Invoice / Billing document specific fields
+    invoice_number: Optional[str] = None
+    invoice_date: Optional[str] = None
+    due_date: Optional[str] = None
+    payment_terms: Optional[str] = None
+    total_amount_due: Optional[str] = None
+    total_gross: Optional[str] = None
+    total_fringe: Optional[str] = None
+    payroll_total: Optional[str] = None
+    billed_to: Optional[str] = None
+    remit_to: Optional[str] = None
+    bank_name: Optional[str] = None
+    account_number: Optional[str] = None
+    routing_number: Optional[str] = None
+    po_number: Optional[str] = None
+    client_code: Optional[str] = None
+    contact_person: Optional[str] = None
+    line_items: list[dict[str, Any]] = Field(default_factory=list)
+
 
 # ─────────────────────────────────────────────────────────────
 # JSON Schema for grammar-constrained LLM output
@@ -409,6 +436,69 @@ Format:
 <|assistant|>
 {{"title":"""
 
+    elif dtype in (
+        "degree_certificate", "marksheet", "professional_certificate",
+        "training_certificate", "achievement_certificate",
+        "internship_certificate", "experience_letter",
+        "offer_letter", "appointment_letter",
+    ):
+        return f"""<|system|>
+You are a fast document intelligence engine specializing in certificate recognition. Output raw JSON only.<|end|>
+<|user|>
+Extract all key information from this Certificate / Official Document image:
+Document: {document_name}
+\"\"\"
+{document_text}
+\"\"\"
+
+Format:
+{{
+  "certificate_name": "Full certificate title (e.g. Certificate of Completion, Degree Certificate)",
+  "certificate_type": "Type: Professional/Achievement/Training/Degree/Experience/Internship/Offer/Other",
+  "issued_to": "Full name of the recipient / awardee",
+  "issuing_organization": "Name of the institution, university, or company that issued it",
+  "issue_date": "Date on the certificate (DD Month YYYY or YYYY-MM-DD)",
+  "credential_id": "Credential ID / Certificate number if present, else null",
+  "document_summary": "One-line summary of what this certificate confirms",
+  "highlights": ["Key verified fact 1", "Key verified fact 2"]
+}}<|end|>
+<|assistant|>
+{{"certificate_name":"""
+
+    elif dtype in ("invoice", "bill", "payslip"):
+        return f"""<|system|>
+You are a fast corporate document intelligence engine. Output raw JSON only.<|end|>
+<|user|>
+Extract structured billing, corporate and financial facts from this Invoice/Statement:
+Document: {document_name}
+\"\"\"
+{document_text}
+\"\"\"
+
+Format:
+{{
+  "invoice_number": "Invoice number / ID",
+  "invoice_date": "Invoice Date (e.g. MM/DD/YYYY)",
+  "due_date": "Due Date or Payment Terms",
+  "payment_terms": "Terms (e.g. DD Net 1 Day, Net 30)",
+  "total_amount_due": "Total amount due with currency symbol (e.g. $6,903.69)",
+  "total_gross": "Total gross amount",
+  "total_fringe": "Total fringe amount",
+  "payroll_total": "Payroll total amount",
+  "billed_to": "Client / Company being billed",
+  "remit_to": "Payee / Company to remit payment to",
+  "bank_name": "Bank name (e.g. Bank of America, Chase)",
+  "account_number": "Account number",
+  "routing_number": "Wire / ACH routing number",
+  "po_number": "PO number / Acct number",
+  "client_code": "Client code / identifier",
+  "contact_person": "Contact person name",
+  "document_summary": "One-line summary of invoice charges and recipient",
+  "highlights": ["Key invoice line item or amount 1", "Key line item 2", "Key line item 3"]
+}}<|end|>
+<|assistant|>
+{{"total_amount_due":"""
+
     else:
         return f"""<|system|>
 You are a fast document intelligence engine. Output raw JSON only.<|end|>
@@ -495,6 +585,42 @@ def _partial_parse(raw: dict, warnings: list[str]) -> ExtractionResult:
             result.highlights = [str(h).strip() for h in raw["highlights"] if h]
         elif isinstance(raw["highlights"], str):
             result.highlights = [str(raw["highlights"]).strip()]
+
+    # Certificate / image document specific fields
+    if "certificate_name" in raw and raw["certificate_name"]:
+        result.certificate_name = str(raw["certificate_name"]).strip()
+    if "certificate_type" in raw and raw["certificate_type"]:
+        result.certificate_type = str(raw["certificate_type"]).strip()
+    if "issued_to" in raw and raw["issued_to"]:
+        result.issued_to = str(raw["issued_to"]).strip()
+        # Also populate personal.name if not already set
+        if not result.personal.name:
+            result.personal.name = result.issued_to
+    if "issuing_organization" in raw and raw["issuing_organization"]:
+        result.issuing_organization = str(raw["issuing_organization"]).strip()
+    if "issue_date" in raw and raw["issue_date"]:
+        result.issue_date = str(raw["issue_date"]).strip()
+        # Also populate year from issue_date if not already set
+        if not result.year:
+            yr = re.search(r"\b(19|20)\d{2}\b", result.issue_date)
+            if yr:
+                result.year = yr.group(0)
+    if "credential_id" in raw and raw["credential_id"] and str(raw["credential_id"]).lower() not in ("null", "none", ""):
+        result.credential_id = str(raw["credential_id"]).strip()
+
+    # Corporate / Invoice / Billing document specific fields
+    for field_name in [
+        "invoice_number", "invoice_date", "due_date", "payment_terms",
+        "total_amount_due", "total_gross", "total_fringe", "payroll_total",
+        "billed_to", "remit_to", "bank_name", "account_number",
+        "routing_number", "po_number", "client_code", "contact_person"
+    ]:
+        val = raw.get(field_name)
+        if val and str(val).lower() not in ("null", "none", ""):
+            setattr(result, field_name, str(val).strip())
+
+    if "line_items" in raw and isinstance(raw["line_items"], list):
+        result.line_items = [item for item in raw["line_items"] if isinstance(item, dict)]
 
     return result
 
@@ -616,13 +742,362 @@ def _apply_rule_based_fallbacks(text: str, result: ExtractionResult, document_ty
             result.document_summary = f"Comprehensive project report documenting implementation, design architecture, and engineering results for {result.title}."
         return
 
-    # ── BRANCH: PHOTO / SCANNED DOCUMENT ──────────────────────────
+    # ── BRANCH: INVOICE / BILLING / PAYROLL / CORPORATE DOCUMENT ─
+    is_invoice = dtype in ("invoice", "bill", "payslip") or any(
+        k in clean_stem.lower() for k in ["invoice", "bill", "payroll", "statement", "receipt"]
+    ) or bool(
+        re.search(r"\b(invoice\s*[:#\d]|total\s+amount\s+due|gross\s+wages|employer\s+fringes|remit\s+payment\s+to|wire\s+routing)\b", text, re.I)
+    )
+
+    if is_invoice:
+        result.personal = PersonalInfo()
+
+        # 1. Invoice Number
+        if not result.invoice_number:
+            inv_match = re.search(r"\b(?:invoice|inv|bill)\s*(?:#|no|number)?\s*[:\-\s]*([A-Za-z0-9\-_]{4,25})\b", text, re.I)
+            if inv_match:
+                result.invoice_number = inv_match.group(1).strip()
+
+        # 2. Total Amount Due
+        if not result.total_amount_due:
+            # Match TOTAL AMOUNT DUE specifically first
+            exact_due = re.search(r"total\s+amount\s+due[^\d$€£\n]*([$€£]?\s*[\d,]+\.\d{2})", text, re.I)
+            if exact_due:
+                result.total_amount_due = exact_due.group(1).replace(" ", "").strip()
+            else:
+                amt_match = re.search(
+                    r"(?:total\s+due|balance\s+due|amount\s+due|total\s+invoice)[^\d$€£\n]*([$€£]?\s*[\d,]+\.\d{2})",
+                    text,
+                    re.I
+                )
+                if amt_match:
+                    result.total_amount_due = amt_match.group(1).replace(" ", "").strip()
+                else:
+                    any_total = re.search(r"\btotal[^\d$€£\n]*([$€£]?\s*[\d,]+\.\d{2})", text, re.I)
+                    if any_total:
+                        result.total_amount_due = any_total.group(1).replace(" ", "").strip()
+
+        # 3. Invoice Date
+        if not result.invoice_date:
+            inv_date_match = re.search(
+                r"\b(?:invoice\s+date|date)\s*[:\-\s]*(\d{1,2}[\/\-\.]\d{1,2}[\/\-\.]\d{2,4})\b",
+                text,
+                re.I
+            )
+            if inv_date_match:
+                result.invoice_date = inv_date_match.group(1).strip()
+                if not result.year:
+                    yr = re.search(r"\b(19|20)\d{2}\b", result.invoice_date)
+                    if yr:
+                        result.year = yr.group(0)
+
+        # 4. Due Date / Terms
+        if not result.due_date:
+            due_match = re.search(
+                r"\b(?:due\s+date|payment\s+due)\s*[:\-\s]*([^\n\r]+)",
+                text,
+                re.I
+            )
+            if due_match:
+                result.due_date = due_match.group(1).splitlines()[0].strip()[:40]
+
+        if not result.payment_terms:
+            terms_match = re.search(
+                r"\b(?:terms|payment\s+terms)\s*[:\-\s]*([^\n\r]+)",
+                text,
+                re.I
+            )
+            if terms_match:
+                result.payment_terms = terms_match.group(1).splitlines()[0].strip()[:40]
+            if not result.due_date and result.payment_terms:
+                result.due_date = result.payment_terms
+
+        # 5. Bank Name & Wire Routing
+        if not result.bank_name:
+            if re.search(r"\bBank\s+of\s+America\b", text, re.I):
+                result.bank_name = "Bank of America"
+            elif re.search(r"\b(?:JPMorgan\s+)?Chase\s+Bank\b", text, re.I):
+                result.bank_name = "Chase Bank"
+            elif re.search(r"\bWells\s+Fargo\b", text, re.I):
+                result.bank_name = "Wells Fargo"
+            elif re.search(r"\bCitibank\b", text, re.I):
+                result.bank_name = "Citibank"
+            elif re.search(r"\bBarclays\b", text, re.I):
+                result.bank_name = "Barclays"
+            elif re.search(r"\bHSBC\b", text, re.I):
+                result.bank_name = "HSBC"
+            else:
+                bank_match = re.search(r"\b([A-Z][A-Za-z\s]+Bank)\b", text)
+                if bank_match:
+                    cand = bank_match.group(1).strip()
+                    if not any(k in cand.lower() for k in ["burbank", "room", "floor"]):
+                        result.bank_name = cand
+
+        if not result.routing_number:
+            routing_match = re.search(
+                r"(?:wire\s+routing|routing\s+number|routing\s+num|aba|ach\s+routing)\s*(?:number|num|#)?\s*[:\-\s]*([0-9\-\s]{4,20})",
+                text,
+                re.I
+            )
+            if routing_match:
+                result.routing_number = re.sub(r"\s+", " ", routing_match.group(1)).strip()
+
+        if not result.account_number:
+            acct_match = re.search(
+                r"(?:account\s+number|acct\s+number|acct\s+num|account\s*#|acct\s*#|account)\s*[:\-\s]*([0-9\-\s]{4,25})",
+                text,
+                re.I
+            )
+            if acct_match:
+                result.account_number = re.sub(r"\s+", " ", acct_match.group(1)).strip()
+
+        # 6. Remit To / Payee
+        if not result.remit_to:
+            remit_match = re.search(
+                r"(?:remit\s+payment\s+to|remit\s+to|payable\s+to)\s*[:\-\s]*([^\n\r]+)",
+                text,
+                re.I
+            )
+            if remit_match:
+                result.remit_to = remit_match.group(1).strip()[:100]
+
+        # 7. Billed To / Client
+        if not result.billed_to:
+            bill_match = re.search(
+                r"(?:bill\s+to|attn)\s*[:\-\s]*([^\n\r]+)",
+                text,
+                re.I
+            )
+            if bill_match:
+                result.billed_to = bill_match.group(1).strip()[:100]
+
+        # 8. PO Number / Client Code / Contact
+        if not result.po_number:
+            po_match = re.search(r"\bpo\s*(?:#|no|num)?\s*[:\-\s]*([A-Za-z0-9\-_]{3,20})\b", text, re.I)
+            if po_match:
+                result.po_number = po_match.group(1).strip()
+
+        if not result.contact_person:
+            contact_match = re.search(r"\bcontact\s*[:\-\s]*([^\n\r]+)", text, re.I)
+            if contact_match:
+                result.contact_person = contact_match.group(1).strip()[:50]
+
+        if not result.client_code:
+            client_match = re.search(r"\bclient\s*[:\-\s]*([^\n\r]+)", text, re.I)
+            if client_match:
+                result.client_code = client_match.group(1).strip()[:40]
+            client_match = re.search(r"\bclient\s*[:\-\s]*([A-Za-z0-9\/\-_]{3,25})\b", text, re.I)
+            if client_match:
+                result.client_code = client_match.group(1).strip()
+
+        # 9. Breakdown Gross & Fringe
+        if not result.total_gross:
+            gross_match = re.search(r"\btotal\s+gross\s*[:\-\s]*([$€£₹]?\s*[\d,]+\.\d{2})\b", text, re.I)
+            if gross_match:
+                result.total_gross = gross_match.group(1).strip()
+
+        if not result.total_fringe:
+            fringe_match = re.search(r"\btotal\s+fringe\s*[:\-\s]*([$€£₹]?\s*[\d,]+\.\d{2})\b", text, re.I)
+            if fringe_match:
+                result.total_fringe = fringe_match.group(1).strip()
+
+        if not result.payroll_total:
+            payroll_match = re.search(r"\bpayroll\s+total\s*[:\-\s]*([$€£₹]?\s*[\d,]+\.\d{2})\b", text, re.I)
+            if payroll_match:
+                result.payroll_total = payroll_match.group(1).strip()
+
+        # 10. Title & Document Summary
+        inv_title = f"Invoice: {result.invoice_number}" if result.invoice_number else f"Corporate Invoice / Billing: {clean_stem.title()}"
+        result.title = inv_title
+
+        summary_parts = []
+        if result.invoice_number:
+            summary_parts.append(f"Invoice #{result.invoice_number}")
+        if result.total_amount_due:
+            summary_parts.append(f"with total amount due of {result.total_amount_due}")
+        if result.due_date:
+            summary_parts.append(f"(Due / Terms: {result.due_date})")
+        if result.remit_to:
+            summary_parts.append(f"payable to {result.remit_to}")
+        result.document_summary = " ".join(summary_parts) + "." if summary_parts else f"Corporate billing invoice detailing charges and payment specifications for {clean_stem}."
+
+        # 11. Highlights
+        inv_highlights = []
+        if result.total_amount_due:
+            inv_highlights.append(f"Total Amount Due: {result.total_amount_due}")
+        if result.due_date:
+            inv_highlights.append(f"Due Date / Terms: {result.due_date}")
+        if result.invoice_number:
+            inv_highlights.append(f"Invoice Number: {result.invoice_number}")
+        if result.bank_name:
+            inv_highlights.append(f"Bank Name: {result.bank_name}")
+        if result.routing_number:
+            inv_highlights.append(f"Routing Number: {result.routing_number}")
+        if result.account_number:
+            inv_highlights.append(f"Account Number: {result.account_number}")
+        if result.po_number:
+            inv_highlights.append(f"PO Number: {result.po_number}")
+        if result.total_gross:
+            inv_highlights.append(f"Total Gross: {result.total_gross}")
+        if result.total_fringe:
+            inv_highlights.append(f"Total Fringe: {result.total_fringe}")
+        result.highlights = inv_highlights or ["Corporate financial document with line-item charge breakdown."]
+
+        return
+
+    # ── BRANCH: CERTIFICATES & CREDENTIALS (Image or Document) ───
+    is_certificate = dtype in (
+        "degree_certificate", "marksheet", "professional_certificate",
+        "training_certificate", "achievement_certificate",
+        "internship_certificate", "experience_letter",
+        "offer_letter", "appointment_letter"
+    ) or any(k in clean_stem.lower() for k in ["certif", "completion", "degree", "diploma", "award"]) or (
+        bool(re.search(r"\b(certificate\s+of|certifies\s+that|is\s+hereby\s+awarded\s+to|presented\s+to|this\s+is\s+to\s+certify)\b", text, re.I))
+    )
+
+    if is_certificate:
+        # 1. Recipient / Issued To Name
+        if not result.issued_to:
+            name_match = re.search(
+                r"(?:certify\s+that|awarded\s+to|presented\s+to|certifies\s+that|conferred\s+upon|this\s+is\s+to\s+certify\s+(?:that)?)\s*[:\-\n\s]*([A-Z][A-Za-z\s.]{2,40})",
+                text,
+                re.I
+            )
+            if name_match:
+                cand_name = re.sub(r"\s+", " ", name_match.group(1)).strip()
+                cand_name = re.sub(r"\b(has|successfully|completed|for|in|on|the|a|an)\b.*$", "", cand_name, flags=re.I).strip()
+                if len(cand_name.split()) in (1, 2, 3, 4) and len(cand_name) > 2:
+                    result.issued_to = cand_name
+                    if not result.personal.name:
+                        result.personal.name = cand_name
+
+        # Recipient fallback from lines following "this is to certify" or standalone prominent names
+        if not result.issued_to:
+            lines = [l.strip() for l in text.splitlines() if l.strip()]
+            for idx, line in enumerate(lines):
+                if re.search(r"\b(certify\s+that|awarded\s+to|presented\s+to)\b", line, re.I):
+                    if idx + 1 < len(lines):
+                        next_line = lines[idx + 1].strip()
+                        if 2 < len(next_line) <= 40 and re.match(r"^[A-Za-z\s.]+$", next_line):
+                            result.issued_to = next_line
+                            if not result.personal.name:
+                                result.personal.name = next_line
+                            break
+
+        # 2. Certificate Name / Title
+        if not result.certificate_name:
+            cert_title_match = re.search(
+                r"\b(certificate\s+of\s+[A-Za-z\s]{3,35}|diploma\s+in\s+[A-Za-z\s]{3,35}|bachelor\s+of\s+[A-Za-z\s]{3,35}|master\s+of\s+[A-Za-z\s]{3,35})\b",
+                text.split("\n\n")[0],
+                re.I
+            )
+            if cert_title_match:
+                # Take just the first line of the match
+                first_line_cert = cert_title_match.group(0).splitlines()[0].strip()
+                result.certificate_name = first_line_cert.title()
+            else:
+                for line in text.splitlines()[:6]:
+                    cl = line.strip()
+                    if re.search(r"\b(certificate|completion|achievement|appreciation|excellence|degree)\b", cl, re.I) and len(cl) < 70:
+                        result.certificate_name = cl.title()
+                        break
+                if not result.certificate_name:
+                    result.certificate_name = f"Certificate: {clean_stem.title()}"
+
+        if not result.title:
+            result.title = result.certificate_name
+
+        # 3. Issuing Organization / Body
+        if not result.issuing_organization:
+            # Check explicit "Issued by" or "Provided by" or "Offered by"
+            issued_by_match = re.search(r"(?:issued\s+by|offered\s+by|organized\s+by|authorized\s+by|provider)\s*[:\-]?\s*([^\n\r]+)", text, re.I)
+            if issued_by_match:
+                org_cand = issued_by_match.group(1).strip()
+                if len(org_cand) > 2 and len(org_cand) < 80:
+                    result.issuing_organization = org_cand
+            
+            if not result.issuing_organization:
+                org_match = re.search(
+                    r"\b([A-Za-z\s]+(?:University|Institute|College|Academy|Corporation|Inc|LLC|Technologies|Udemy|Coursera|Google|Amazon|Microsoft|Cisco|IBM|Meta|Paavai|NPTEL))\b",
+                    text,
+                    re.I
+                )
+                if org_match:
+                    found_org = org_match.group(1).splitlines()[0].strip()
+                    if result.issued_to and found_org.lower() != result.issued_to.lower():
+                        result.issuing_organization = found_org
+            
+            if not result.issuing_organization:
+                # Top header lines often state the institution
+                first_lines = [l.strip() for l in text.splitlines()[:4] if len(l.strip()) > 3]
+                for fl in first_lines:
+                    if not re.search(r"\b(certificate|certify|completion|date|id)\b", fl, re.I) and len(fl) < 60:
+                        if not result.issued_to or fl.lower() != result.issued_to.lower():
+                            result.issuing_organization = fl
+                            break
+
+        # 4. Issue Date
+        if not result.issue_date:
+            date_match = re.search(
+                r"\b(?:issued\s+on|date\s*[:\-]|dated\s*[:\-]?)?\s*(\d{1,2}[\/\-\.\s](?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec|[A-Za-z]+|\d{1,2})[\/\-\.\s]\d{2,4})\b",
+                text,
+                re.I
+            )
+            if date_match:
+                result.issue_date = date_match.group(1).strip()
+                if not result.year:
+                    yr = re.search(r"\b(19|20)\d{2}\b", result.issue_date)
+                    if yr:
+                        result.year = yr.group(0)
+
+        # 5. Credential ID
+        if not result.credential_id:
+            cred_match = re.search(
+                r"(?:certificate\s*(?:no|id|#)|credential\s*(?:id|#)|verification\s*code)\s*[:\-\s]*([A-Za-z0-9\-_]{5,30})",
+                text,
+                re.I
+            )
+            if cred_match:
+                result.credential_id = cred_match.group(1).strip()
+
+        # 6. Highlights & Summary
+        if not result.document_summary:
+            summary_parts = []
+            if result.certificate_name:
+                summary_parts.append(f"{result.certificate_name}")
+            if result.issued_to:
+                summary_parts.append(f"conferred upon {result.issued_to}")
+            if result.issuing_organization:
+                summary_parts.append(f"by {result.issuing_organization}")
+            if result.issue_date:
+                summary_parts.append(f"on {result.issue_date}")
+            result.document_summary = " ".join(summary_parts) + "." if summary_parts else f"Official certificate verifying credentials and completion for {clean_stem}."
+
+        if not result.highlights:
+            cert_highlights = []
+            if result.issued_to:
+                cert_highlights.append(f"Recipient: {result.issued_to}")
+            if result.issuing_organization:
+                cert_highlights.append(f"Issuer: {result.issuing_organization}")
+            if result.issue_date:
+                cert_highlights.append(f"Date Issued: {result.issue_date}")
+            if result.credential_id:
+                cert_highlights.append(f"Credential ID: {result.credential_id}")
+            result.highlights = cert_highlights or ["Verified official certificate of completion and professional recognition."]
+
+        return
+
+    # ── BRANCH: PHOTO / SCANNED DOCUMENT (General Image) ──────────
     if dtype == "photo_document":
         result.personal = PersonalInfo()
         if not result.title:
             result.title = f"Scanned Document / Photo: {clean_stem}"
         if not result.document_summary:
             result.document_summary = f"Visual document snapshot processed via optical character recognition, capturing text and data elements from {clean_stem}."
+        if not result.highlights:
+            non_empty_lines = [l.strip() for l in text.splitlines() if len(l.strip()) > 10]
+            if non_empty_lines:
+                result.highlights = non_empty_lines[:6]
         return
 
     # ── BRANCH: RESUME / CV ───────────────────────────────────────

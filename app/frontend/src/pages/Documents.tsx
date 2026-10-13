@@ -26,6 +26,11 @@ const DOC_TYPE_LABELS: Record<string, string> = {
   project_report: 'Project Report',
   book: 'Book / Publication',
   photo_document: 'Image / Scanned Document',
+  invoice: 'Corporate Invoice / Billing Statement',
+  bill: 'Bill / Payment Receipt',
+  payslip: 'Salary Slip / Payroll Statement',
+  audio: 'Audio Track / Recording',
+  video: 'Video Recording / Keyframes',
   needs_review: 'Needs Review',
   other: 'General Document',
 }
@@ -42,7 +47,7 @@ export function Documents() {
   const [loadingPages, setLoadingPages] = useState(false)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
-  const ACCEPTED = '.pdf,.docx,.doc,.jpg,.jpeg,.png'
+  const ACCEPTED = '.pdf,.docx,.doc,.jpg,.jpeg,.png,.webp,.wav,.mp3,.mp4,.mov,.avi,.mkv,.webm,.txt'
 
   const loadDocuments = async () => {
     try {
@@ -360,6 +365,31 @@ export function Documents() {
 
               const year = (metadata?.year && !['not provided', 'null', 'none'].includes(String(metadata.year).toLowerCase())) ? String(metadata.year) : null
               
+              const certName = metadata?.certificate_name || null
+              const issuedTo = metadata?.issued_to || personal?.name || null
+              const issuingOrg = metadata?.issuing_organization || null
+              const issueDate = metadata?.issue_date || year || null
+              const credId = metadata?.credential_id || null
+              const certType = metadata?.certificate_type || null
+
+              // Corporate Invoice / Billing variables
+              const invoiceNumber = metadata?.invoice_number || null
+              const invoiceDate = metadata?.invoice_date || null
+              const dueDate = metadata?.due_date || null
+              const paymentTerms = metadata?.payment_terms || null
+              const totalAmountDue = metadata?.total_amount_due || null
+              const totalGross = metadata?.total_gross || null
+              const totalFringe = metadata?.total_fringe || null
+              const payrollTotal = metadata?.payroll_total || null
+              const billedTo = metadata?.billed_to || null
+              const remitTo = metadata?.remit_to || null
+              const bankName = metadata?.bank_name || null
+              const accountNumber = metadata?.account_number || null
+              const routingNumber = metadata?.routing_number || null
+              const poNumber = metadata?.po_number || null
+              const clientCode = metadata?.client_code || null
+              const contactPerson = metadata?.contact_person || null
+              
               let conceptLines = toLines(metadata?.concept)
               if (conceptLines.length === 0 && firstPageText) {
                 const sentences = firstPageText.split(/(?<=[.?!])\s+/).map((s: string) => s.trim()).filter((s: string) => s.length > 25)
@@ -381,12 +411,15 @@ export function Documents() {
                 }
               }
 
+              const isInvoice = ['invoice', 'bill', 'payslip'].includes(selectedDoc.document_type || '') || !!totalAmountDue || !!invoiceNumber || !!bankName || !!routingNumber
+              const isAudio = selectedDoc.document_type === 'audio' || ['wav', 'mp3', 'm4a', 'aac', 'ogg'].includes(selectedDoc.file_type || '')
+              const isVideo = selectedDoc.document_type === 'video' || ['mp4', 'mov', 'avi', 'mkv', 'webm'].includes(selectedDoc.file_type || '')
               const isBook = selectedDoc.document_type === 'book'
               const isProject = selectedDoc.document_type === 'project_report'
               const isPaper = selectedDoc.document_type === 'research_paper'
               const isPhoto = selectedDoc.document_type === 'photo_document'
               const isResume = ['resume', 'cv'].includes(selectedDoc.document_type || '')
-              const isCert = ['degree_certificate', 'marksheet', 'experience_letter', 'offer_letter', 'appointment_letter', 'internship_certificate', 'professional_certificate', 'training_certificate', 'achievement_certificate'].includes(selectedDoc.document_type || '')
+              const isCert = !isInvoice && !isAudio && !isVideo && (['degree_certificate', 'marksheet', 'experience_letter', 'offer_letter', 'appointment_letter', 'internship_certificate', 'professional_certificate', 'training_certificate', 'achievement_certificate'].includes(selectedDoc.document_type || '') || !!certName || !!issuedTo || !!issuingOrg)
 
               return (
                 <div style={{ fontSize: 16, lineHeight: 1.85, color: '#1f2937' }}>
@@ -616,26 +649,61 @@ export function Documents() {
                           <div style={{ fontSize: 16, lineHeight: 1.85, color: '#334155' }}>{documentSummary}</div>
                         </div>
                       )}
-                      {personal?.name && (
-                        <div style={{ marginBottom: 20 }}>
-                          <div style={{ fontWeight: 700, fontSize: 17, color: '#111827' }}>👤 Awarded To:</div>
-                          <div style={{ fontSize: 16, color: '#374151' }}>{personal.name}</div>
+
+                      {/* Key Certificate Information Card */}
+                      <div style={{ marginBottom: 24, backgroundColor: '#f0fdf4', padding: '20px', borderRadius: 8, border: '1px solid #bbf7d0' }}>
+                        <div style={{ fontWeight: 700, fontSize: 18, color: '#166534', marginBottom: 14 }}>
+                          🎓 Extracted Key Information:
                         </div>
-                      )}
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px', fontSize: 15, lineHeight: 1.6 }}>
+                          {certName && (
+                            <div>
+                              <strong style={{ color: '#374151' }}>Certificate Title:</strong>
+                              <div style={{ color: '#15803d', fontWeight: 600 }}>{certName}</div>
+                            </div>
+                          )}
+                          {issuedTo && (
+                            <div>
+                              <strong style={{ color: '#374151' }}>Issued To (Recipient):</strong>
+                              <div style={{ color: '#111827', fontWeight: 600 }}>{issuedTo}</div>
+                            </div>
+                          )}
+                          {issuingOrg && (
+                            <div>
+                              <strong style={{ color: '#374151' }}>Issuing Organization:</strong>
+                              <div style={{ color: '#111827' }}>{issuingOrg}</div>
+                            </div>
+                          )}
+                          {issueDate && (
+                            <div>
+                              <strong style={{ color: '#374151' }}>Date of Issue:</strong>
+                              <div style={{ color: '#111827' }}>{issueDate}</div>
+                            </div>
+                          )}
+                          {credId && (
+                            <div>
+                              <strong style={{ color: '#374151' }}>Credential / Cert ID:</strong>
+                              <div style={{ color: '#0369a1', fontFamily: 'monospace', fontWeight: 600 }}>{credId}</div>
+                            </div>
+                          )}
+                          {certType && (
+                            <div>
+                              <strong style={{ color: '#374151' }}>Certificate Type:</strong>
+                              <div style={{ color: '#111827' }}>{certType}</div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
                       {certifications.length > 0 && (
                         <div style={{ marginBottom: 24 }}>
-                          <div style={{ fontWeight: 700, fontSize: 17, color: '#111827', marginBottom: 8 }}>📜 Certification Details:</div>
+                          <div style={{ fontWeight: 700, fontSize: 17, color: '#111827', marginBottom: 8 }}>📜 Additional Details / Skills Verified:</div>
                           <ul style={{ margin: 0, paddingLeft: 24 }}>
                             {certifications.map((item, i) => <li key={i} style={{ marginBottom: 6, lineHeight: 1.8 }}>{item}</li>)}
                           </ul>
                         </div>
                       )}
-                      {year && (
-                        <div style={{ marginBottom: 20 }}>
-                          <div style={{ fontWeight: 700, fontSize: 17, color: '#111827' }}>📅 Date / Year:</div>
-                          <div style={{ fontSize: 16, color: '#374151' }}>{year}</div>
-                        </div>
-                      )}
+
                       {highlightLines.length > 0 && (
                         <div style={{ marginBottom: 24, backgroundColor: '#f9fafb', padding: '16px 20px', borderRadius: 6, borderLeft: '4px solid #059669' }}>
                           <div style={{ fontWeight: 700, fontSize: 17, color: '#065f46', marginBottom: 8 }}>✨ Verification Highlights:</div>
@@ -647,8 +715,204 @@ export function Documents() {
                     </>
                   )}
 
+                  {/* ── CORPORATE INVOICE / BILLING VIEW ── */}
+                  {isInvoice && (
+                    <>
+                      {documentSummary && (
+                        <div style={{ marginBottom: 24, backgroundColor: '#f8fafc', padding: '16px 20px', borderRadius: 6, borderLeft: '4px solid #0284c7' }}>
+                          <div style={{ fontWeight: 700, fontSize: 17, color: '#0369a1', marginBottom: 6 }}>💼 Corporate Invoice Summary:</div>
+                          <div style={{ fontSize: 16, lineHeight: 1.85, color: '#334155' }}>{documentSummary}</div>
+                        </div>
+                      )}
+
+                      {/* Primary Amount Due Banner */}
+                      {totalAmountDue && (
+                        <div style={{
+                          marginBottom: 24, backgroundColor: '#fef2f2', padding: '18px 24px',
+                          borderRadius: 8, border: '2px solid #f87171', display: 'flex',
+                          alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12
+                        }}>
+                          <div>
+                            <div style={{ textTransform: 'uppercase', fontSize: 13, letterSpacing: '0.05em', color: '#991b1b', fontWeight: 700 }}>
+                              Total Amount Due
+                            </div>
+                            <div style={{ fontSize: 32, fontWeight: 800, color: '#dc2626', marginTop: 4 }}>
+                              {totalAmountDue}
+                            </div>
+                          </div>
+                          {(dueDate || paymentTerms) && (
+                            <div style={{ textAlign: 'right' }}>
+                              <div style={{ fontSize: 13, textTransform: 'uppercase', color: '#7f1d1d', fontWeight: 600 }}>Payment Terms / Due Date</div>
+                              <div style={{ fontSize: 17, fontWeight: 700, color: '#991b1b', marginTop: 4 }}>{dueDate || paymentTerms}</div>
+                            </div>
+                          )}
+                        </div>
+                      )}
+
+                      {/* Financial & Corporate Specification Grid */}
+                      <div style={{ marginBottom: 24, backgroundColor: '#f0fdf4', padding: '22px', borderRadius: 8, border: '1px solid #bbf7d0' }}>
+                        <div style={{ fontWeight: 700, fontSize: 18, color: '#166534', marginBottom: 14 }}>
+                          📊 Financial &amp; Corporate Specifications:
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', fontSize: 15, lineHeight: 1.6 }}>
+                          {invoiceNumber && (
+                            <div>
+                              <strong style={{ color: '#374151' }}>Invoice Number:</strong>
+                              <div style={{ color: '#0369a1', fontWeight: 700, fontFamily: 'monospace', fontSize: 16 }}>{invoiceNumber}</div>
+                            </div>
+                          )}
+                          {invoiceDate && (
+                            <div>
+                              <strong style={{ color: '#374151' }}>Invoice Date:</strong>
+                              <div style={{ color: '#111827', fontWeight: 600 }}>{invoiceDate}</div>
+                            </div>
+                          )}
+                          {poNumber && (
+                            <div>
+                              <strong style={{ color: '#374151' }}>PO Number / Account:</strong>
+                              <div style={{ color: '#111827', fontWeight: 600 }}>{poNumber}</div>
+                            </div>
+                          )}
+                          {clientCode && (
+                            <div>
+                              <strong style={{ color: '#374151' }}>Client Code / ID:</strong>
+                              <div style={{ color: '#111827' }}>{clientCode}</div>
+                            </div>
+                          )}
+                          {contactPerson && (
+                            <div>
+                              <strong style={{ color: '#374151' }}>Contact Person:</strong>
+                              <div style={{ color: '#111827' }}>{contactPerson}</div>
+                            </div>
+                          )}
+                          {totalGross && (
+                            <div>
+                              <strong style={{ color: '#374151' }}>Total Gross:</strong>
+                              <div style={{ color: '#111827', fontWeight: 600 }}>${totalGross.replace(/^\$/, '')}</div>
+                            </div>
+                          )}
+                          {totalFringe && (
+                            <div>
+                              <strong style={{ color: '#374151' }}>Total Fringe:</strong>
+                              <div style={{ color: '#111827', fontWeight: 600 }}>${totalFringe.replace(/^\$/, '')}</div>
+                            </div>
+                          )}
+                          {payrollTotal && (
+                            <div>
+                              <strong style={{ color: '#374151' }}>Payroll Total:</strong>
+                              <div style={{ color: '#111827', fontWeight: 600 }}>${payrollTotal.replace(/^\$/, '')}</div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Banking & Remittance Instructions */}
+                      {(bankName || routingNumber || accountNumber || remitTo) && (
+                        <div style={{ marginBottom: 24, backgroundColor: '#eff6ff', padding: '20px', borderRadius: 8, border: '1px solid #bfdbfe' }}>
+                          <div style={{ fontWeight: 700, fontSize: 18, color: '#1e40af', marginBottom: 12 }}>
+                            🏦 Banking &amp; Remittance Details:
+                          </div>
+                          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '14px', fontSize: 15 }}>
+                            {bankName && (
+                              <div>
+                                <strong style={{ color: '#1e3a8a' }}>Bank Name:</strong>
+                                <div style={{ color: '#111827', fontWeight: 600, fontSize: 16 }}>{bankName}</div>
+                              </div>
+                            )}
+                            {routingNumber && (
+                              <div>
+                                <strong style={{ color: '#1e3a8a' }}>Wire / ACH Routing Number:</strong>
+                                <div style={{ color: '#0369a1', fontWeight: 700, fontFamily: 'monospace' }}>{routingNumber}</div>
+                              </div>
+                            )}
+                            {accountNumber && (
+                              <div>
+                                <strong style={{ color: '#1e3a8a' }}>Account Number:</strong>
+                                <div style={{ color: '#0369a1', fontWeight: 700, fontFamily: 'monospace' }}>{accountNumber}</div>
+                              </div>
+                            )}
+                            {remitTo && (
+                              <div style={{ gridColumn: '1 / -1' }}>
+                                <strong style={{ color: '#1e3a8a' }}>Remit Payment To:</strong>
+                                <div style={{ color: '#111827', marginTop: 2 }}>{remitTo}</div>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Key Highlights & Line Item Breakdown */}
+                      {highlightLines.length > 0 && (
+                        <div style={{ marginBottom: 24, backgroundColor: '#f9fafb', padding: '16px 20px', borderRadius: 6, borderLeft: '4px solid #059669' }}>
+                          <div style={{ fontWeight: 700, fontSize: 17, color: '#065f46', marginBottom: 8 }}>📋 Line-by-Line Document Highlights:</div>
+                          <ul style={{ margin: 0, paddingLeft: 24 }}>
+                            {highlightLines.map((h, i) => <li key={i} style={{ marginBottom: 6, lineHeight: 1.8 }}>{h}</li>)}
+                          </ul>
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  {/* ── AUDIO INTELLIGENCE VIEW ── */}
+                  {isAudio && (
+                    <>
+                      <div style={{ marginBottom: 24, backgroundColor: '#f0fdf4', padding: '20px', borderRadius: 8, border: '1px solid #bbf7d0' }}>
+                        <div style={{ fontWeight: 700, fontSize: 18, color: '#166534', marginBottom: 10 }}>
+                          🎙️ Audio Track &amp; Speech-to-Text Intelligence:
+                        </div>
+                        <div style={{ fontSize: 15, color: '#15803d', marginBottom: 12 }}>
+                          Captured speech transcription and audio track details.
+                        </div>
+                        {firstPageText && (
+                          <div style={{ backgroundColor: '#ffffff', padding: '16px', borderRadius: 6, border: '1px solid #dcfce7', fontSize: 15, lineHeight: 1.7, color: '#1f2937' }}>
+                            <strong>Transcript:</strong>
+                            <div style={{ marginTop: 6, fontStyle: 'italic' }}>{firstPageText}</div>
+                          </div>
+                        )}
+                      </div>
+
+                      {highlightLines.length > 0 && (
+                        <div style={{ marginBottom: 24, backgroundColor: '#f9fafb', padding: '16px 20px', borderRadius: 6, borderLeft: '4px solid #059669' }}>
+                          <div style={{ fontWeight: 700, fontSize: 17, color: '#065f46', marginBottom: 8 }}>📌 Key Spoken Topics &amp; Highlights:</div>
+                          <ul style={{ margin: 0, paddingLeft: 24 }}>
+                            {highlightLines.map((h, i) => <li key={i} style={{ marginBottom: 6, lineHeight: 1.8 }}>{h}</li>)}
+                          </ul>
+                        </div>
+                      )}
+                    </>
+                  )}
+
+                  {/* ── VIDEO INTELLIGENCE VIEW ── */}
+                  {isVideo && (
+                    <>
+                      <div style={{ marginBottom: 24, backgroundColor: '#eff6ff', padding: '20px', borderRadius: 8, border: '1px solid #bfdbfe' }}>
+                        <div style={{ fontWeight: 700, fontSize: 18, color: '#1e40af', marginBottom: 10 }}>
+                          🎬 Video Keyframe &amp; Optical Intelligence:
+                        </div>
+                        <div style={{ fontSize: 15, color: '#1d4ed8', marginBottom: 12 }}>
+                          Sampled keyframes across timeline with visual text, slide recognition, and audio transcript.
+                        </div>
+                        {firstPageText && (
+                          <div style={{ backgroundColor: '#ffffff', padding: '16px', borderRadius: 6, border: '1px solid #dbeafe', fontSize: 15, lineHeight: 1.7, color: '#1f2937' }}>
+                            <strong>Visual &amp; Audio Summary:</strong>
+                            <pre style={{ marginTop: 8, whiteSpace: 'pre-wrap', fontFamily: 'inherit', fontSize: 14 }}>{firstPageText}</pre>
+                          </div>
+                        )}
+                      </div>
+
+                      {highlightLines.length > 0 && (
+                        <div style={{ marginBottom: 24, backgroundColor: '#f9fafb', padding: '16px 20px', borderRadius: 6, borderLeft: '4px solid #059669' }}>
+                          <div style={{ fontWeight: 700, fontSize: 17, color: '#065f46', marginBottom: 8 }}>📌 Timeline Key Moments:</div>
+                          <ul style={{ margin: 0, paddingLeft: 24 }}>
+                            {highlightLines.map((h, i) => <li key={i} style={{ marginBottom: 6, lineHeight: 1.8 }}>{h}</li>)}
+                          </ul>
+                        </div>
+                      )}
+                    </>
+                  )}
+
                   {/* ── GENERAL / OTHER VIEW ── */}
-                  {!isBook && !isProject && !isPaper && !isPhoto && !isResume && !isCert && (
+                  {!isBook && !isProject && !isPaper && !isPhoto && !isResume && !isCert && !isInvoice && !isAudio && !isVideo && (
                     <>
                       {documentSummary && (
                         <div style={{ marginBottom: 24, backgroundColor: '#f8fafc', padding: '16px 20px', borderRadius: 6, borderLeft: '4px solid #0284c7' }}>

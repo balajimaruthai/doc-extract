@@ -62,7 +62,8 @@ class Settings(BaseSettings):
 
     # Allowed MIME types (magic-byte validated)
     ALLOWED_EXTENSIONS: list[str] = [
-        "pdf", "docx", "doc", "jpg", "jpeg", "png"
+        "pdf", "docx", "doc", "jpg", "jpeg", "png", "webp",
+        "wav", "mp3", "mp4", "mov", "avi", "mkv", "webm", "txt"
     ]
 
     def model_post_init(self, __context) -> None:
