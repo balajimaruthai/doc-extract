@@ -47,9 +47,25 @@ async def init_db() -> None:
     logger.info(f"Initializing database at {get_db_path()}")
     async with aiosqlite.connect(str(get_db_path())) as conn:
         await conn.execute("PRAGMA journal_mode=WAL")
-        await conn.execute("PRAGMA foreign_keys=ON")
         conn.row_factory = aiosqlite.Row
         await _create_schema(conn)
+        # Backfill file_data for any existing documents where file is on disk
+        try:
+            from core.config import settings
+            cur = await conn.execute("SELECT id, safe_filename FROM documents WHERE file_data IS NULL")
+            missing_files = await cur.fetchall()
+            for r in missing_files:
+                doc_id = r[0] if isinstance(r, (tuple, list)) else r["id"]
+                s_name = r[1] if isinstance(r, (tuple, list)) else r["safe_filename"]
+                p = settings.UPLOADS_DIR / s_name
+                if p.exists():
+                    try:
+                        b = p.read_bytes()
+                        await conn.execute("UPDATE documents SET file_data = ? WHERE id = ?", (b, doc_id))
+                    except Exception:
+                        pass
+        except Exception as e:
+            logger.warning(f"File backfill notice: {e}")
         await conn.commit()
     logger.info("Database schema ready")
 
@@ -78,9 +94,67 @@ async def _create_schema(conn: aiosqlite.Connection) -> None:
             error_message TEXT,
             notes TEXT,
             metadata_json TEXT,
+            file_data BLOB,
+            mime_type TEXT,
             UNIQUE(content_hash)
         )
     """)
+
+    # Safe migration for existing documents table
+    try:
+        cur = await conn.execute("PRAGMA table_info(documents)")
+        rows = await cur.fetchall()
+        doc_cols = set()
+        for r in rows:
+            if isinstance(r, (tuple, list)):
+                doc_cols.add(r[1])
+            else:
+                doc_cols.add(r["name"])
+        if "file_data" not in doc_cols:
+            await conn.execute("ALTER TABLE documents ADD COLUMN file_data BLOB")
+        if "mime_type" not in doc_cols:
+            await conn.execute("ALTER TABLE documents ADD COLUMN mime_type TEXT")
+    except Exception as e:
+        logger.warning(f"Documents schema migration notice: {e}")
+
+    # Extracted Structured Financial Records
+    await conn.execute("""
+        CREATE TABLE IF NOT EXISTS extracted_financial_records (
+            id TEXT PRIMARY KEY,
+            document_id TEXT NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+            original_filename TEXT,
+            document_type TEXT,
+            invoice_number TEXT,
+            invoice_date TEXT,
+            normalized_invoice_date TEXT,
+            due_date TEXT,
+            normalized_due_date TEXT,
+            payment_terms TEXT,
+            po_number TEXT,
+            merchant_or_vendor TEXT,
+            client_or_customer TEXT,
+            subtotal REAL,
+            tax_amount REAL,
+            discount_amount REAL,
+            handling_fee REAL,
+            tip_amount REAL,
+            total_gross REAL,
+            total_fringe REAL,
+            payroll_total REAL,
+            amount_paid REAL,
+            balance_due REAL,
+            total_amount_due REAL,
+            currency TEXT DEFAULT 'USD',
+            math_verified INTEGER DEFAULT 0,
+            line_items_json TEXT,
+            raw_extracted_json TEXT,
+            validation_report_json TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(document_id)
+        )
+    """)
+    await conn.execute("CREATE INDEX IF NOT EXISTS idx_fin_records_doc ON extracted_financial_records(document_id)")
 
     # Document pages (extracted text per page)
     await conn.execute("""

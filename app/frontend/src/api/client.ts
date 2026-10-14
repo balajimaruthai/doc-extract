@@ -71,6 +71,9 @@ export const documentsApi = {
   },
   get: (id: string) => request<DocumentRecord>(`/documents/${id}`),
   getText: (id: string) => request<{ pages: PageText[] }>(`/documents/${id}/text`),
+  getFileUrl: (id: string) => `${BASE_URL}/documents/${id}/file`,
+  getFinancialRecord: (id: string) => request<any>(`/documents/${id}/financial-record`),
+  listFinancialRecords: () => request<{ records: any[]; total: number }>('/documents/financial-records'),
   delete: (id: string) => request<{ message: string }>(`/documents/${id}`, { method: 'DELETE' }),
   stats: () => request<DocumentStats>('/documents/stats/summary'),
 }

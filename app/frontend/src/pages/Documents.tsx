@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef } from 'react'
-import { Upload, FileText, Trash2, RefreshCw, Eye, AlertTriangle, X, BookOpen, Sparkles, User, Calendar, CheckCircle2, Play } from 'lucide-react'
+import { Upload, FileText, Trash2, RefreshCw, Eye, AlertTriangle, X, BookOpen, Sparkles, User, Calendar, CheckCircle2, Play, Download } from 'lucide-react'
 import { documentsApi, processingApi, type DocumentRecord, type PageText } from '../api/client'
 
 const STATUS_LABELS: Record<string, { label: string; class: string }> = {
@@ -297,7 +297,25 @@ export function Documents() {
                       <td className="text-muted">{formatSize(doc.file_size)}</td>
                       <td className="text-muted">{doc.page_count ?? '—'}</td>
                       <td>{doc.ocr_performed ? <span className="badge badge-info">OCR</span> : <span className="text-muted">—</span>}</td>
-                      <td><span className={`badge ${s.class}`}>{s.label}</span></td>
+                      <td>
+                        <span className={`badge ${s.class}`}>{s.label}</span>
+                        {doc.processing_status === 'failed' && doc.error_message && (
+                          <div
+                            className="text-muted text-xs mt-xs"
+                            style={{
+                              maxWidth: 160,
+                              color: 'var(--color-error, #ef4444)',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                              cursor: 'help'
+                            }}
+                            title={`Failure reason: ${doc.error_message}`}
+                          >
+                            ⚠️ {doc.error_message}
+                          </div>
+                        )}
+                      </td>
                       <td className="text-muted text-xs">{formatDate(doc.upload_timestamp)}</td>
                       <td>
                         <div className="flex gap-sm items-center">
@@ -335,6 +353,16 @@ export function Documents() {
                               <RefreshCw size={11} className="spinner" /> Working…
                             </span>
                           )}
+                          <a
+                            href={documentsApi.getFileUrl(doc.id)}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="btn btn-secondary btn-sm"
+                            style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '5px 7px', minWidth: 28 }}
+                            title="Download/view original file stored in SQL"
+                          >
+                            <Download size={13} />
+                          </a>
                           <button
                             className="btn btn-danger btn-sm"
                             style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '5px 7px', minWidth: 28 }}

@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import APIRouter, File, Form, HTTPException, UploadFile, BackgroundTasks
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 
 from core.config import settings
 from database.connection import get_connection
@@ -35,6 +35,9 @@ async def upload_document(
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Upload failed: {e}")
+
+    import mimetypes
+    mime_type = file.content_type or mimetypes.guess_type(file.filename or "")[0] or "application/octet-stream"
 
     # Check for duplicate
     async with get_connection() as conn:
@@ -72,16 +75,18 @@ async def upload_document(
                 }
             )
 
-        # Insert document record
+        # Insert document record with SQL BLOB file storage
         await conn.execute(
             """INSERT INTO documents (
                 id, original_filename, safe_filename, file_type,
-                file_size, content_hash, upload_timestamp, processing_status
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')""",
+                file_size, content_hash, upload_timestamp, processing_status,
+                file_data, mime_type
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?)""",
             (
                 metadata.id, metadata.original_filename, metadata.safe_filename,
                 metadata.file_type, metadata.file_size,
                 metadata.content_hash, metadata.upload_timestamp,
+                file_data, mime_type,
             )
         )
         await conn.commit()
@@ -145,17 +150,114 @@ async def list_documents(
     }
 
 
-@router.get("/{doc_id}")
-async def get_document(doc_id: str):
-    """Get document metadata."""
+@router.get("/financial-records")
+async def list_financial_records(limit: int = 50, offset: int = 0):
+    """List structured financial records stored in the SQL database."""
     async with get_connection() as conn:
         cursor = await conn.execute(
-            "SELECT * FROM documents WHERE id = ?", (doc_id,)
+            """SELECT id, document_id, original_filename, document_type,
+                      invoice_number, invoice_date, normalized_invoice_date,
+                      due_date, normalized_due_date, payment_terms, po_number,
+                      merchant_or_vendor, client_or_customer,
+                      subtotal, tax_amount, discount_amount, handling_fee, tip_amount,
+                      total_gross, total_fringe, payroll_total, amount_paid, balance_due,
+                      total_amount_due, currency, math_verified,
+                      line_items_json, validation_report_json, created_at, updated_at
+               FROM extracted_financial_records
+               ORDER BY created_at DESC LIMIT ? OFFSET ?""",
+            (limit, offset)
+        )
+        rows = await cursor.fetchall()
+        total_cursor = await conn.execute("SELECT COUNT(*) FROM extracted_financial_records")
+        total = (await total_cursor.fetchone())[0]
+
+    return {
+        "records": [dict(r) for r in rows],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }
+
+
+@router.get("/{doc_id}")
+async def get_document(doc_id: str):
+    """Get document metadata (excluding heavy binary BLOB)."""
+    async with get_connection() as conn:
+        cursor = await conn.execute(
+            """SELECT id, original_filename, safe_filename, file_type, file_size,
+                      content_hash, upload_timestamp, processing_status,
+                      has_native_text, ocr_performed, ocr_confidence, page_count,
+                      document_type, classification_confidence, classification_method,
+                      error_message, notes, metadata_json, mime_type
+               FROM documents WHERE id = ?""",
+            (doc_id,)
         )
         row = await cursor.fetchone()
 
     if not row:
         raise HTTPException(status_code=404, detail="Document not found")
+
+    return dict(row)
+
+
+@router.get("/{doc_id}/file")
+async def get_document_file(doc_id: str):
+    """Retrieve the original uploaded file from disk or SQL BLOB storage."""
+    async with get_connection() as conn:
+        cursor = await conn.execute(
+            "SELECT original_filename, safe_filename, mime_type, file_data FROM documents WHERE id = ?",
+            (doc_id,)
+        )
+        doc = await cursor.fetchone()
+
+    if not doc:
+        raise HTTPException(status_code=404, detail="Document not found")
+
+    content = None
+    file_path = settings.UPLOADS_DIR / doc["safe_filename"]
+    if file_path.exists():
+        try:
+            content = file_path.read_bytes()
+        except Exception:
+            pass
+
+    if content is None and doc["file_data"]:
+        content = doc["file_data"]
+
+    if content is None:
+        raise HTTPException(status_code=404, detail="Document file content not found on disk or database")
+
+    mime = doc["mime_type"] or "application/octet-stream"
+    filename = doc["original_filename"] or "download"
+
+    return Response(
+        content=content,
+        media_type=mime,
+        headers={"Content-Disposition": f'inline; filename="{filename}"'}
+    )
+
+
+@router.get("/{doc_id}/financial-record")
+async def get_document_financial_record(doc_id: str):
+    """Get structured financial extraction record stored in SQL for a document."""
+    async with get_connection() as conn:
+        cursor = await conn.execute(
+            """SELECT id, document_id, original_filename, document_type,
+                      invoice_number, invoice_date, normalized_invoice_date,
+                      due_date, normalized_due_date, payment_terms, po_number,
+                      merchant_or_vendor, client_or_customer,
+                      subtotal, tax_amount, discount_amount, handling_fee, tip_amount,
+                      total_gross, total_fringe, payroll_total, amount_paid, balance_due,
+                      total_amount_due, currency, math_verified,
+                      line_items_json, validation_report_json, raw_extracted_json,
+                      created_at, updated_at
+               FROM extracted_financial_records WHERE document_id = ?""",
+            (doc_id,)
+        )
+        row = await cursor.fetchone()
+
+    if not row:
+        raise HTTPException(status_code=404, detail="Financial record not found for this document")
 
     return dict(row)
 
@@ -196,8 +298,11 @@ async def delete_document(doc_id: str):
                 pass
 
         # Cleanly delete all referencing child rows to satisfy foreign key constraints
-        for tbl in ["document_pages", "processing_jobs", "profile_documents"]:
-            await conn.execute(f"DELETE FROM {tbl} WHERE document_id = ?", (doc_id,))
+        for tbl in ["document_pages", "processing_jobs", "profile_documents", "extracted_financial_records"]:
+            try:
+                await conn.execute(f"DELETE FROM {tbl} WHERE document_id = ?", (doc_id,))
+            except Exception:
+                pass
 
         for tbl in ["education", "experience", "skills", "certifications", "projects", "achievements", "evidence"]:
             await conn.execute(f"DELETE FROM {tbl} WHERE source_document_id = ?", (doc_id,))

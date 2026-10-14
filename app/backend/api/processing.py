@@ -200,6 +200,15 @@ async def _process_single_document(doc_id: str) -> Optional[dict]:
         await conn.commit()
 
     file_path = settings.UPLOADS_DIR / doc["safe_filename"]
+    if not file_path.exists():
+        if "file_data" in doc.keys() and doc["file_data"]:
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.write_bytes(doc["file_data"])
+            logger.info(f"Restored file {file_path.name} from SQL database BLOB")
+        else:
+            await _mark_failed(doc_id, f"File {doc['safe_filename']} not found on disk or database")
+            return None
+
     file_type = doc["file_type"]
     pages_text = []
     extraction_ms = 0
@@ -516,6 +525,80 @@ async def _process_single_document(doc_id: str) -> Optional[dict]:
                 )
             )
             await conn.commit()
+
+        # Store extracted structured financial record in dedicated SQL relational table
+        try:
+            def _to_float(v):
+                if v is None:
+                    return None
+                if isinstance(v, (int, float)):
+                    return float(v)
+                import re
+                cleaned = re.sub(r"[^\d.-]", "", str(v))
+                try:
+                    return float(cleaned) if cleaned else None
+                except ValueError:
+                    return None
+
+            fin_rec_id = str(uuid.uuid4())
+            now_iso = datetime.now(timezone.utc).isoformat()
+            subtotal_val = _to_float(extraction_result.subtotal)
+            tax_val = _to_float(extraction_result.tax_amount)
+            discount_val = _to_float(extraction_result.discount_amount)
+            handling_val = _to_float(extraction_result.handling_fee)
+            tip_val = _to_float(extraction_result.tip_amount)
+            gross_val = _to_float(extraction_result.total_gross)
+            fringe_val = _to_float(extraction_result.total_fringe)
+            payroll_val = _to_float(extraction_result.payroll_total)
+            paid_val = _to_float(extraction_result.amount_paid)
+            balance_val = _to_float(extraction_result.balance_due)
+            total_val = _to_float(extraction_result.total_amount_due or extraction_result.total_payable_due)
+
+            cols = [
+                "id", "document_id", "original_filename", "document_type",
+                "invoice_number", "invoice_date", "normalized_invoice_date",
+                "due_date", "normalized_due_date", "payment_terms", "po_number",
+                "merchant_or_vendor", "client_or_customer",
+                "subtotal", "tax_amount", "discount_amount", "handling_fee", "tip_amount",
+                "total_gross", "total_fringe", "payroll_total", "amount_paid", "balance_due",
+                "total_amount_due", "currency", "math_verified",
+                "line_items_json", "raw_extracted_json", "validation_report_json",
+                "created_at", "updated_at"
+            ]
+            async with get_connection() as conn:
+                existing_cur = await conn.execute(
+                    "SELECT id FROM extracted_financial_records WHERE document_id = ?", (doc_id,)
+                )
+                existing_row = await existing_cur.fetchone()
+                fin_id = existing_row[0] if existing_row else str(uuid.uuid4())
+
+                values = [
+                    fin_id, doc_id, doc["original_filename"], classification.document_type.value,
+                    extraction_result.invoice_number,
+                    extraction_result.invoice_date,
+                    extraction_result.normalized_invoice_date,
+                    extraction_result.due_date,
+                    extraction_result.normalized_due_date,
+                    extraction_result.payment_terms,
+                    extraction_result.po_number,
+                    extraction_result.merchant_name or extraction_result.remit_to,
+                    extraction_result.billed_to,
+                    subtotal_val, tax_val, discount_val, handling_val, tip_val,
+                    gross_val, fringe_val, payroll_val, paid_val, balance_val,
+                    total_val, "USD",
+                    1 if extraction_result.math_verified else 0,
+                    json.dumps(extraction_result.line_items) if extraction_result.line_items else None,
+                    json.dumps(doc_meta) if doc_meta else None,
+                    json.dumps(extraction_result.validation_report) if extraction_result.validation_report else None,
+                    now_iso, now_iso,
+                ]
+
+                placeholders = ", ".join(["?"] * len(cols))
+                sql = f"INSERT OR REPLACE INTO extracted_financial_records ({', '.join(cols)}) VALUES ({placeholders})"
+                await conn.execute(sql, values)
+                await conn.commit()
+        except Exception as e:
+            logger.warning(f"Failed to record in extracted_financial_records for {doc_id}: {e}", exc_info=True)
 
         logger.info(f"Document {doc_id} processed successfully")
 
