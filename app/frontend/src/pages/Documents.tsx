@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react'
-import { Upload, FileText, Trash2, RefreshCw, Eye, AlertTriangle, X, BookOpen, Sparkles, User, Calendar, CheckCircle2 } from 'lucide-react'
-import { documentsApi, type DocumentRecord, type PageText } from '../api/client'
+import { Upload, FileText, Trash2, RefreshCw, Eye, AlertTriangle, X, BookOpen, Sparkles, User, Calendar, CheckCircle2, Play } from 'lucide-react'
+import { documentsApi, processingApi, type DocumentRecord, type PageText } from '../api/client'
 
 const STATUS_LABELS: Record<string, { label: string; class: string }> = {
   pending: { label: 'Pending', class: 'badge-neutral' },
@@ -45,6 +45,7 @@ export function Documents() {
   const [selectedDoc, setSelectedDoc] = useState<DocumentRecord | null>(null)
   const [docPages, setDocPages] = useState<PageText[]>([])
   const [loadingPages, setLoadingPages] = useState(false)
+  const [processingId, setProcessingId] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   const ACCEPTED = '.pdf,.docx,.doc,.xlsx,.xls,.csv,.jpg,.jpeg,.png,.webp,.wav,.mp3,.mp4,.mov,.avi,.mkv,.webm,.txt'
@@ -67,6 +68,34 @@ export function Documents() {
   }
 
   useEffect(() => { loadDocuments() }, [])
+
+  // Auto-poll when any document is pending or processing
+  useEffect(() => {
+    const hasActive = documents.some(d => d.processing_status === 'pending' || d.processing_status === 'processing')
+    if (!hasActive) return
+
+    const timer = setInterval(() => {
+      documentsApi.list({ limit: 100 }).then(r => {
+        setDocuments(r.documents)
+        setTotal(r.total)
+      }).catch(() => {})
+    }, 2500)
+
+    return () => clearInterval(timer)
+  }, [documents])
+
+  const handleProcessDoc = async (docId: string) => {
+    setProcessingId(docId)
+    setError(null)
+    try {
+      await processingApi.processSingle(docId)
+      await loadDocuments()
+    } catch (e: any) {
+      setError(e.message)
+    } finally {
+      setTimeout(() => setProcessingId(null), 1000)
+    }
+  }
 
   const handleFiles = async (files: FileList | File[]) => {
     const fileArray = Array.from(files)
@@ -281,6 +310,30 @@ export function Documents() {
                             >
                               <Eye size={13} /> View
                             </button>
+                          )}
+                          {doc.processing_status !== 'completed' && doc.processing_status !== 'processing' && (
+                            <button
+                              className="btn btn-secondary btn-sm"
+                              style={{ display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 10px', fontSize: 12, fontWeight: 600 }}
+                              onClick={() => handleProcessDoc(doc.id)}
+                              disabled={processingId === doc.id}
+                              title={doc.processing_status === 'failed' ? (doc.error_message ? `Failed: ${doc.error_message}. Click to retry.` : 'Retry Processing') : 'Process Document Now'}
+                            >
+                              {processingId === doc.id ? (
+                                <>
+                                  <RefreshCw size={12} className="spinner" /> Processing…
+                                </>
+                              ) : (
+                                <>
+                                  <Play size={12} /> {doc.processing_status === 'failed' ? 'Retry' : 'Process'}
+                                </>
+                              )}
+                            </button>
+                          )}
+                          {doc.processing_status === 'processing' && (
+                            <span className="badge badge-info" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11 }}>
+                              <RefreshCw size={11} className="spinner" /> Working…
+                            </span>
                           )}
                           <button
                             className="btn btn-danger btn-sm"

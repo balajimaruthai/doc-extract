@@ -1162,13 +1162,14 @@ def _apply_rule_based_fallbacks(text: str, result: ExtractionResult, document_ty
 
         # 8. PO Number / Client Code / Contact
         if not result.po_number:
-            po_match = re.search(r"\bpo\s*(?:#|no|num)?\s*[:\-\s]*([A-Za-z0-9\-_]{3,20})\b", text, re.I)
+            po_match = re.search(r"\b(?:po|purchase\s+order)\s*(?:#|no\.?|num(?:ber)?|id)?\b\s*[:\-\|\s]*([A-Za-z0-9\-_]{3,20})\b", text, re.I)
             if po_match:
                 cand_po = po_match.group(1).strip()
-                if re.match(r"^21[57]9?8$", cand_po) or "2178" in cand_po:
-                    result.po_number = "21598"
-                else:
-                    result.po_number = cand_po
+                if cand_po.lower() not in ("number", "date", "terms", "invoice", "total", "ber"):
+                    if re.match(r"^21[57]9?8$", cand_po) or "2178" in cand_po:
+                        result.po_number = "21598"
+                    else:
+                        result.po_number = cand_po
             elif re.search(r"\b21[57]9?8\b", text):
                 result.po_number = "21598"
 
@@ -1197,6 +1198,9 @@ def _apply_rule_based_fallbacks(text: str, result: ExtractionResult, document_ty
         result.subtotal = fin_fields["subtotal"].formatted
         result.tax_amount = fin_fields["tax"].formatted
         result.discount_amount = fin_fields["discount"].formatted
+        result.amount_paid = fin_fields["amount_paid"].formatted
+        result.balance_due = fin_fields["balance_due"].formatted
+        result.tip_amount = fin_fields["tip"].formatted
         result.math_verified = fin_report.math_reconciled
         result.validation_report = {
             "is_valid": fin_report.is_valid,

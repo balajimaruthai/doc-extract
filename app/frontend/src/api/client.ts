@@ -82,6 +82,10 @@ export const processingApi = {
       method: 'POST',
       body: JSON.stringify({ document_ids: documentIds, create_profile: createProfile }),
     }),
+  processSingle: (docId: string) =>
+    request<{ status: string; message: string }>(`/processing/single/${docId}`, {
+      method: 'POST',
+    }),
   getStatus: (docId: string) => request<ProcessingStatus>(`/processing/status/${docId}`),
 }
 

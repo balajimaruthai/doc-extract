@@ -48,6 +48,7 @@ def extract_pdf(file_path: Path, ocr_dpi: int = 300) -> PDFExtractionResult:
         file_path: Path to the PDF file
         ocr_dpi: DPI for rendering pages that need OCR (default 300 for optimal OCR precision)
     """
+    file_path = Path(file_path)
     pages: list[PageText] = []
     is_password_protected = False
     error = None

@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile, BackgroundTasks
 from fastapi.responses import JSONResponse
 
 from core.config import settings
@@ -17,7 +17,10 @@ router = APIRouter()
 
 
 @router.post("/upload")
-async def upload_document(file: UploadFile = File(...)):
+async def upload_document(
+    file: UploadFile = File(...),
+    background_tasks: BackgroundTasks = None,
+):
     """
     Upload and ingest a document. Validates file type, checks for duplicates.
     """
@@ -83,13 +86,21 @@ async def upload_document(file: UploadFile = File(...)):
         )
         await conn.commit()
 
+    # Automatically trigger background processing immediately upon upload
+    if background_tasks:
+        try:
+            from api.processing import _process_single_document
+            background_tasks.add_task(_process_single_document, doc_id=metadata.id)
+        except Exception:
+            pass
+
     return {
         "id": metadata.id,
         "filename": metadata.original_filename,
         "file_type": metadata.file_type,
         "file_size": metadata.file_size,
-        "status": "pending",
-        "message": "Document uploaded successfully",
+        "status": "processing" if background_tasks else "pending",
+        "message": "Document uploaded and processing initiated",
     }
 
 

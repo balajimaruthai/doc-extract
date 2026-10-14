@@ -92,25 +92,32 @@ def extract_labeled_amount(
 ) -> FinancialField:
     """
     Search text for a specific financial label followed closely by its numeric value.
-    Uses strict line and boundary matching to prevent matching numbers across unrelated lines.
+    Supports same line (horizontal), markdown table rows (with |), and stacked (next line) values.
     """
     for pat in label_patterns:
-        # Match label, optional parenthetical notes like (8%), (Store Promo), (5%),
-        # horizontal whitespace, optional colon/dash/minus, currency symbol, and amount
-        full_regex = rf"(?i)\b{pat}\b[^\S\r\n]*(?:\([^\)\n\r]+\))?[^\S\r\n]*[:\-]?[^\S\r\n]*-?([$€£₹]?[^\S\r\n]*[\d,.]+(?:[.,]\d{{1,2}})?)(?![^\S\r\n]*%)"
+        # Match label, optional parenthetical notes, optional horizontal/vertical separator, optional currency and amount
+        full_regex = (
+            rf"(?i)\b{pat}\b"
+            rf"[^\S\r\n]*(?:\([^\)\n\r]+\))?[^\S\r\n]*"
+            rf"(?:[:\-\|]|--+)?[^\S\r\n]*"
+            rf"(?:\r?\n[^\S\r\n]*)?"
+            rf"(?:[:\-\|]|--+)?[^\S\r\n]*"
+            rf"-?([$€£₹]?[^\S\r\n]*[\d,]+(?:\.\d{{1,2}})?)"
+            rf"(?![^\S\r\n]*%)"
+        )
         matches = list(re.finditer(full_regex, text))
         for m in matches:
             line_start = text.rfind("\n", 0, m.start()) + 1
             line_end = text.find("\n", m.end())
             if line_end == -1:
                 line_end = len(text)
-            matched_line = text[line_start:line_end]
+            matched_segment = text[line_start:line_end]
 
             # Check negative patterns to avoid false matches
             if negative_patterns:
                 skip = False
                 for neg in negative_patterns:
-                    if re.search(neg, matched_line, re.I):
+                    if re.search(neg, matched_segment, re.I):
                         skip = True
                         break
                 if skip:
@@ -120,7 +127,7 @@ def extract_labeled_amount(
             num = parse_currency_number(val_str)
             # Avoid single digit non-currency false matches like standalone '2'
             if num is not None and (num >= 1.0 or any(sym in m.group(1) for sym in ["$", "€", "£", "₹"]) or "." in val_str or "," in val_str):
-                matched_label = m.group(0)[:m.start(1) - m.start(0)].strip(" :\t-")
+                matched_label = m.group(0)[:m.start(1) - m.start(0)].strip(" :\t-|\r\n")
                 curr_symbol = "$"
                 if any(sym in m.group(1) for sym in ["€", "£", "₹"]):
                     curr_symbol = [sym for sym in ["€", "£", "₹"] if sym in m.group(1)][0]
@@ -226,6 +233,7 @@ def extract_financial_data(text: str) -> Tuple[Dict[str, FinancialField], Financ
         text,
         label_patterns=[
             r"total\s+amount\s+due",
+            r"balance\s+due",
             r"final\s+total(?:\s*/\s*amount\s+due)?",
             r"final\s+total",
             r"total\s+current\s+charges",
@@ -233,14 +241,14 @@ def extract_financial_data(text: str) -> Tuple[Dict[str, FinancialField], Financ
             r"total\s+amount\s+payable",
             r"net\s+payable",
             r"amount\s+payable",
-            r"balance\s+due",
             r"total\s+due",
             r"amount\s+due",
+            r"invoice\s+total",
             r"grand\s+total",
             r"balance\s+payable",
             r"total\s+paid",
         ],
-        negative_patterns=[r"gross", r"fringe", r"subtotal", r"before\s+tax"],
+        negative_patterns=[r"gross", r"fringe", r"subtotal", r"before\s+tax", r"line\s+total"],
         default_label="TOTAL AMOUNT DUE"
     )
 
@@ -542,6 +550,22 @@ def validate_financial_consistency(
                 )
                 report.math_reconciled = True
                 report.confidence = max(report.confidence, 0.99)
+
+    # Check 4b: Invoice Total (Subtotal - Discount + Tax) - Amount Paid == Balance Due
+    if subtotal is not None and paid is not None and balance is not None:
+        calc_tot = round(subtotal + (tax or 0.0) - (discount or 0.0), 2)
+        calc_bal = round(calc_tot - paid, 2)
+        if abs(calc_bal - balance) <= 0.05:
+            fields["balance_due"].is_verified = True
+            fields["amount_paid"].is_verified = True
+            fields["subtotal"].is_verified = True
+            if total_due is not None and abs(total_due - balance) <= 0.05:
+                fields["total_amount_due"].is_verified = True
+            report.verified_calculations.append(
+                f"Reconciled Balance: Invoice Total ({calc_tot}) - Paid ({paid}) = Balance Due ({balance})"
+            )
+            report.math_reconciled = True
+            report.confidence = max(report.confidence, 0.99)
 
     # Overall validity
     if report.validation_warnings and not report.math_reconciled:

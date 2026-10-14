@@ -96,6 +96,23 @@ async def start_processing(
     }
 
 
+@router.post("/single/{doc_id}")
+async def process_single_document_endpoint(
+    doc_id: str,
+    background_tasks: BackgroundTasks,
+):
+    """Trigger processing for a single document."""
+    async with get_connection() as conn:
+        cursor = await conn.execute("SELECT id FROM documents WHERE id = ?", (doc_id,))
+        if not await cursor.fetchone():
+            raise HTTPException(status_code=404, detail="Document not found")
+        await conn.execute("UPDATE documents SET processing_status = 'pending', error_message = NULL WHERE id = ?", (doc_id,))
+        await conn.commit()
+
+    background_tasks.add_task(_process_single_document, doc_id=doc_id)
+    return {"status": "processing", "message": f"Processing started for {doc_id}"}
+
+
 @router.get("/status/{doc_id}")
 async def get_processing_status(doc_id: str):
     """Get processing status for a document."""
@@ -185,6 +202,11 @@ async def _process_single_document(doc_id: str) -> Optional[dict]:
     file_path = settings.UPLOADS_DIR / doc["safe_filename"]
     file_type = doc["file_type"]
     pages_text = []
+    extraction_ms = 0
+    classification_ms = 0
+    llm_ms = 0
+    validation_ms = 5
+    total_processing_ms = 0
 
     try:
         # ── PHASE 1: Text Extraction ──────────────────────────
@@ -416,6 +438,11 @@ async def _process_single_document(doc_id: str) -> Optional[dict]:
             if extraction_result.po_number: doc_meta["po_number"] = extraction_result.po_number
             if extraction_result.client_code: doc_meta["client_code"] = extraction_result.client_code
             if extraction_result.contact_person: doc_meta["contact_person"] = extraction_result.contact_person
+            if extraction_result.subtotal: doc_meta["subtotal"] = extraction_result.subtotal
+            if extraction_result.tax_amount: doc_meta["tax_amount"] = extraction_result.tax_amount
+            if extraction_result.discount_amount: doc_meta["discount_amount"] = extraction_result.discount_amount
+            if extraction_result.amount_paid: doc_meta["amount_paid"] = extraction_result.amount_paid
+            if extraction_result.balance_due: doc_meta["balance_due"] = extraction_result.balance_due
             if extraction_result.line_items: doc_meta["line_items"] = extraction_result.line_items
 
             # Receipt / POS metadata

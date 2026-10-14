@@ -149,3 +149,54 @@ def test_utility_service_bill():
     assert res.normalized_due_date == "2026-02-15"
     assert res.total_amount_due == "$114.80"
     assert res.math_verified is True
+
+
+def test_docextract_service_invoice_with_payment_and_balance_due():
+    text = """
+    NORTHSTAR DIGITAL SERVICES
+    SERVICE INVOICE
+    Invoice Number
+    INV-2026-1047
+    Invoice Date
+    10/14/2026
+    PO Number
+    PO-78421
+    Payment Terms
+    Net 15 Days
+    Due Date
+    10/29/2026
+    Currency
+    USD
+    Bill To: Greenfield Retail Solutions
+    42 Market Street, Austin, TX 78701
+    Contact: accounts@greenfield.example
+    
+    Subtotal
+    $4,400.00
+    Discount
+    -$150.00
+    Tax (8.25%)
+    $350.63
+    Invoice Total
+    $4,600.63
+    Amount Paid
+    $1,000.00
+    BALANCE DUE
+    $3,600.63
+    """
+    res = ExtractionResult()
+    _apply_rule_based_fallbacks(text, res, "invoice", "DocExtract_Test_Invoice.pdf")
+
+    assert res.invoice_number == "INV-2026-1047"
+    assert res.normalized_invoice_date == "2026-10-14"
+    assert res.payment_terms == "Net 15 Days"
+    assert res.normalized_due_date == "2026-10-29"
+    assert res.po_number == "PO-78421"
+    assert res.subtotal == "$4,400.00"
+    assert res.discount_amount == "$150.00"
+    assert res.tax_amount == "$350.63"
+    assert res.amount_paid == "$1,000.00"
+    assert res.balance_due == "$3,600.63"
+    assert res.total_amount_due == "$3,600.63"
+    assert res.math_verified is True
+
