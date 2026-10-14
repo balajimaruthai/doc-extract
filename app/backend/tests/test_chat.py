@@ -99,3 +99,121 @@ def test_offline_chat_summarize():
     )
     assert "Summary of AP_Invoice.pdf" in ans
     assert "$6,903.69" in ans
+
+
+def test_offline_chat_medical_records():
+    pages = [
+        {
+            "page_number": 1,
+            "cleaned_text": """
+            CITY GENERAL HOSPITAL - PATIENT RECORD
+            Patient Name: Sarah Connor
+            Date of Birth: 1985-04-12
+            Attending Physician: Dr. James Marcus
+            Diagnosis: Acute Bronchitis with mild wheezing
+            Blood Pressure: 120/80 mmHg
+            Prescription: Amoxicillin 500mg TID for 7 days
+            Follow-up: 2 weeks
+            """
+        }
+    ]
+    doc_meta = {"document_type": "medical_record"}
+
+    # Question 1: What is the diagnosis?
+    ans, sources, conf = _offline_grounded_answer(
+        question="What is the diagnosis?",
+        doc_meta=doc_meta,
+        fin_record=None,
+        pages=pages,
+        doc_name="Patient_Report_001.pdf"
+    )
+    assert "Acute Bronchitis" in ans
+    assert conf >= 0.90
+
+    # Question 2: Who is the attending physician?
+    ans2, _, _ = _offline_grounded_answer(
+        question="Who is the attending physician?",
+        doc_meta=doc_meta,
+        fin_record=None,
+        pages=pages,
+        doc_name="Patient_Report_001.pdf"
+    )
+    assert "Dr. James Marcus" in ans2
+
+
+def test_offline_chat_legal_contract():
+    pages = [
+        {
+            "page_number": 1,
+            "cleaned_text": """
+            NON-DISCLOSURE AGREEMENT
+            Effective Date: November 01, 2026
+            Disclosing Party: Apex Robotics Inc.
+            Receiving Party: Quantum Softworks LLC
+            Governing Law: State of Delaware
+            Term: 3 years from effective date
+            Confidentiality Period: 5 years following termination
+            """
+        }
+    ]
+    doc_meta = {"document_type": "contract"}
+
+    # Ask for governing law
+    ans, sources, conf = _offline_grounded_answer(
+        question="What is the governing law?",
+        doc_meta=doc_meta,
+        fin_record=None,
+        pages=pages,
+        doc_name="Apex_NDA.pdf"
+    )
+    assert "State of Delaware" in ans
+
+    # Ask for term
+    ans2, _, _ = _offline_grounded_answer(
+        question="What is the term of this agreement?",
+        doc_meta=doc_meta,
+        fin_record=None,
+        pages=pages,
+        doc_name="Apex_NDA.pdf"
+    )
+    assert "3 years" in ans2
+
+
+def test_offline_chat_unknown_data_and_logs():
+    pages = [
+        {
+            "page_number": 1,
+            "cleaned_text": """
+            SYS-LOG-TIMESTAMP 2026-10-14T08:22:15Z
+            System Component: Authentication Gateway
+            Incident ID: INC-88401
+            Error Code: AUTH_TIMEOUT_504
+            Root Cause: Redis cluster connection pool exhausted on port 6379
+            Mitigation: Increased maximum connection pool size from 50 to 200
+            Status: Resolved
+            """
+        }
+    ]
+    doc_meta = {"document_type": "unknown"}
+
+    # Ask for incident ID
+    ans, _, _ = _offline_grounded_answer(
+        question="What is the incident ID and error code?",
+        doc_meta=doc_meta,
+        fin_record=None,
+        pages=pages,
+        doc_name="system_debug.log"
+    )
+    assert "INC-88401" in ans
+    assert "AUTH_TIMEOUT_504" in ans
+
+    # Ask for root cause
+    ans2, _, _ = _offline_grounded_answer(
+        question="What was the root cause?",
+        doc_meta=doc_meta,
+        fin_record=None,
+        pages=pages,
+        doc_name="system_debug.log"
+    )
+    assert "Redis cluster" in ans2
+

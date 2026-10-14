@@ -53,6 +53,28 @@ def _clean_num_str(val: Any) -> Optional[str]:
     return s if s else None
 
 
+def _extract_key_value_pairs(pages: list[dict]) -> list[dict]:
+    """Extract all labeled key-value pairs and tabular entries across pages."""
+    kv_pairs = []
+    kv_pattern = re.compile(r"^[\s•*-]*([A-Za-z0-9\s/&#_\(\).-]{2,45})\s*[:=]\s*([^\n\r]+)$", re.MULTILINE)
+    
+    for pg in pages:
+        txt = pg.get("cleaned_text") or pg.get("raw_text") or ""
+        p_num = pg.get("page_number", 1)
+        for match in kv_pattern.finditer(txt):
+            k = match.group(1).strip()
+            v = match.group(2).strip()
+            if len(k) > 1 and len(v) > 0 and len(k.split()) <= 6:
+                kv_pairs.append({
+                    "key": k,
+                    "key_lower": k.lower(),
+                    "value": v,
+                    "page": p_num,
+                    "line": match.group(0).strip()
+                })
+    return kv_pairs
+
+
 def _offline_grounded_answer(
     question: str,
     doc_meta: dict,
@@ -61,15 +83,18 @@ def _offline_grounded_answer(
     doc_name: str,
 ) -> tuple[str, list[ChatSource], float]:
     """
-    Deterministic, zero-hallucination semantic answering for document inquiries.
-    Runs 100% offline without needing an external network or heavy LLM weights.
+    Universal, zero-hallucination semantic answering for ALL document types,
+    records, tables, reports, contracts, medical forms, and unknown data.
+    Runs 100% offline without needing external network or heavy LLM weights.
     """
     q = question.lower().strip()
     sources: list[ChatSource] = []
     ans_parts = []
-    conf = 0.95
+    doc_type = (fin_record.get("document_type") if fin_record else doc_meta.get("document_type")) or "document"
+    full_text = "\n\n".join(p.get("cleaned_text") or p.get("raw_text") or "" for p in pages)
+    kv_pairs = _extract_key_value_pairs(pages)
 
-    # 1. Total Amount Due / Final Payable Amount
+    # 1. Financial totals & amounts (Invoices, Bills, Receipts, POs, Statements)
     if any(k in q for k in ["total amount due", "amount due", "final amount", "balance due", "total payable", "how much is due", "how much do i owe", "what is due", "total due", "payable amount"]):
         total_due = None
         if fin_record and fin_record.get("total_amount_due") is not None:
@@ -128,12 +153,12 @@ def _offline_grounded_answer(
                 ans_parts.append("\n✅ *Mathematical consistency has been verified deterministically from document figures.*")
             return "\n".join(ans_parts), sources, 0.98
 
-    # 2. Due Date and Payment Terms
-    if any(k in q for k in ["due date", "when is it due", "payment terms", "terms", "deadline", "pay by"]):
-        due_date = fin_record.get("normalized_due_date") if fin_record else doc_meta.get("normalized_due_date") or doc_meta.get("due_date")
-        raw_due = fin_record.get("due_date") if fin_record else doc_meta.get("due_date")
-        terms = fin_record.get("payment_terms") if fin_record else doc_meta.get("payment_terms")
-        inv_date = fin_record.get("normalized_invoice_date") if fin_record else doc_meta.get("normalized_invoice_date") or doc_meta.get("invoice_date")
+    # 2. Universal Due Dates, Effective Dates, Deadlines & Timelines
+    if any(k in q for k in ["due date", "when is it due", "payment terms", "terms", "deadline", "pay by", "effective date", "valid until", "expiration", "expiry date"]):
+        due_date = (fin_record.get("normalized_due_date") if fin_record else None) or doc_meta.get("normalized_due_date") or doc_meta.get("due_date")
+        raw_due = (fin_record.get("due_date") if fin_record else None) or doc_meta.get("due_date")
+        terms = (fin_record.get("payment_terms") if fin_record else None) or doc_meta.get("payment_terms")
+        inv_date = (fin_record.get("normalized_invoice_date") if fin_record else None) or doc_meta.get("normalized_invoice_date") or doc_meta.get("invoice_date")
 
         if due_date or terms:
             if due_date:
@@ -146,135 +171,155 @@ def _offline_grounded_answer(
                 ans_parts.append(f"\nCalculated from Invoice Date ({inv_date}) + Payment Terms ({terms}) -> Due Date ({due_date}).")
             return "\n".join(ans_parts), sources, 0.98
 
-    # 3. Invoice Number / PO Number / Identifier
-    if any(k in q for k in ["invoice number", "invoice #", "invoice no", "po number", "purchase order", "account number", "reference"]):
-        inv_no = fin_record.get("invoice_number") if fin_record else doc_meta.get("invoice_number")
-        po_no = fin_record.get("po_number") if fin_record else doc_meta.get("po_number")
-        acc_no = doc_meta.get("account_number")
-
-        if inv_no or po_no or acc_no:
-            if inv_no:
-                ans_parts.append(f"**Invoice Number:** `{inv_no}`")
-                sources.append(ChatSource(page=1, label="Invoice Number", value=str(inv_no), snippet=f"Invoice #{inv_no}"))
-            if po_no:
-                ans_parts.append(f"**PO Number:** `{po_no}`")
-                sources.append(ChatSource(page=1, label="PO Number", value=str(po_no), snippet=f"PO Number: {po_no}"))
-            if acc_no:
-                ans_parts.append(f"**Account Number:** `{acc_no}`")
-            return "\n".join(ans_parts), sources, 0.99
-
-    # 4. Vendor / Supplier / Customer / Billing entities
-    if any(k in q for k in ["who", "vendor", "supplier", "merchant", "billed to", "remit to", "client", "customer"]):
-        vendor = fin_record.get("merchant_or_vendor") if fin_record else doc_meta.get("merchant_name") or doc_meta.get("remit_to")
-        billed = fin_record.get("client_or_customer") if fin_record else doc_meta.get("billed_to")
-
-        if vendor or billed:
-            if vendor:
-                ans_parts.append(f"**Vendor / Issuer:** {vendor}")
-                sources.append(ChatSource(page=1, label="Vendor", value=str(vendor), snippet=f"Vendor: {vendor}"))
-            if billed:
-                ans_parts.append(f"**Billed To / Customer:** {billed}")
-                sources.append(ChatSource(page=1, label="Customer", value=str(billed), snippet=f"Billed To: {billed}"))
+        # Check for other date key-value pairs (e.g. Effective Date, Expiration Date, Issue Date)
+        date_matches = [kv for kv in kv_pairs if any(d in kv["key_lower"] for d in ["date", "expiry", "effective", "valid", "period", "deadline", "schedule"])]
+        if date_matches:
+            ans_parts.append(f"### Relevant Dates in {doc_name}:\n")
+            for m in date_matches[:6]:
+                ans_parts.append(f"- **{m['key']}:** `{m['value']}` *(Page {m['page']})*")
+                sources.append(ChatSource(page=m["page"], label=m["key"], value=m["value"], snippet=m["line"]))
             return "\n".join(ans_parts), sources, 0.95
 
-    # 5. Summarize / Overview
-    if any(k in q for k in ["summarize", "summary", "overview", "what is this", "tell me about"]):
-        summary = doc_meta.get("document_summary")
-        doc_type = (fin_record.get("document_type") if fin_record else doc_meta.get("document_type")) or "document"
-        
-        ans_parts.append(f"### Summary of {doc_name}\n")
-        ans_parts.append(f"- **Document Type:** {doc_type.replace('_', ' ').title()}")
-        if summary:
-            ans_parts.append(f"- **Overview:** {summary}")
-        
-        # Financial recap
-        if fin_record and fin_record.get("total_amount_due") is not None:
-            ans_parts.append(f"- **Total Amount Due:** ${fin_record['total_amount_due']:,.2f}")
-        if fin_record and fin_record.get("due_date"):
-            ans_parts.append(f"- **Due Date:** {fin_record['due_date']}")
-        if fin_record and fin_record.get("invoice_number"):
-            ans_parts.append(f"- **Reference/Invoice:** {fin_record['invoice_number']}")
+    # 3. Direct Key-Value Pair Lookup (Works on ANY record / form / unknown data)
+    q_tokens = [w for w in re.findall(r"\b[a-z0-9_-]{2,}\b", q) if w not in {"what", "when", "where", "which", "who", "does", "have", "this", "that", "from", "with", "show", "find", "tell", "give", "the", "and", "for"}]
+    matching_kvs = []
+    for kv in kv_pairs:
+        k_tokens = set(re.findall(r"\b[a-z0-9_-]{2,}\b", kv["key_lower"]))
+        overlap = sum(1 for t in q_tokens if t in k_tokens or any(t in kt for kt in k_tokens))
+        if overlap > 0:
+            matching_kvs.append((overlap, kv))
 
-        # Resume/profile recap
-        if doc_meta.get("personal"):
-            p = doc_meta["personal"]
-            ans_parts.append(f"- **Name:** {p.get('name')}")
-            if p.get("email"): ans_parts.append(f"- **Contact:** {p.get('email')} / {p.get('phone')}")
-        if doc_meta.get("skills"):
-            skills_preview = ", ".join(doc_meta["skills"][:8])
-            ans_parts.append(f"- **Key Skills:** {skills_preview}")
-
-        sources.append(ChatSource(page=1, label="Summary", snippet=f"Document summary generated from verified {doc_type} fields."))
+    if matching_kvs:
+        matching_kvs.sort(key=lambda x: (x[0], -len(x[1]["key"])), reverse=True)
+        top_kvs = [kv for _, kv in matching_kvs[:5]]
+        ans_parts.append(f"From **{doc_name}**:\n")
+        for kv in top_kvs:
+            ans_parts.append(f"- **{kv['key']}:** **{kv['value']}** *(Page {kv['page']})*")
+            sources.append(ChatSource(page=kv["page"], label=kv["key"], value=kv["value"], snippet=kv["line"]))
         return "\n".join(ans_parts), sources, 0.95
 
-    # 6. Line Items / Breakdown
-    if any(k in q for k in ["line item", "items", "breakdown", "charges", "fees", "subtotal", "tax", "discount"]):
+    # 4. Universal Document Summarization (Supports ALL document types & unknown records)
+    if any(k in q for k in ["summarize", "summary", "overview", "what is this", "tell me about", "explain", "describe"]):
+        ans_parts.append(f"### Summary of {doc_name}\n")
+        ans_parts.append(f"- **Document Type:** {doc_type.replace('_', ' ').title()}")
+
+        if doc_meta.get("document_summary"):
+            ans_parts.append(f"- **Executive Summary:** {doc_meta['document_summary']}")
+
+        if doc_meta.get("title"):
+            ans_parts.append(f"- **Title / Header:** {doc_meta['title']}")
+
+        # Financial details if applicable
+        if fin_record and fin_record.get("total_amount_due") is not None:
+            ans_parts.append(f"- **Total Amount Due:** ${fin_record['total_amount_due']:,.2f}")
+        if fin_record and fin_record.get("invoice_number"):
+            ans_parts.append(f"- **Reference #:** {fin_record['invoice_number']}")
+
+        # Profile / Resume details if applicable
+        if doc_meta.get("personal"):
+            p = doc_meta["personal"]
+            if p.get("name"): ans_parts.append(f"- **Subject / Name:** {p.get('name')}")
+            if p.get("email"): ans_parts.append(f"- **Contact:** {p.get('email')}")
+        if doc_meta.get("skills"):
+            ans_parts.append(f"- **Highlights / Skills:** {', '.join(doc_meta['skills'][:6])}")
+
+        # Extracted key records from unknown or structured documents
+        if kv_pairs:
+            ans_parts.append("\n**Key Detected Fields & Records:**")
+            seen_keys = set()
+            count = 0
+            for kv in kv_pairs:
+                if kv["key_lower"] not in seen_keys and count < 8:
+                    seen_keys.add(kv["key_lower"])
+                    ans_parts.append(f"- **{kv['key']}:** {kv['value']}")
+                    count += 1
+
+        # Page count & layout
+        ans_parts.append(f"\n*Total pages analyzed: {len(pages)}*")
+        sources.append(ChatSource(page=1, label="Overview", snippet=f"Comprehensive summary for {doc_name} ({doc_type})."))
+        return "\n".join(ans_parts), sources, 0.95
+
+    # 5. Table rows, line items, lists, or structured records
+    if any(k in q for k in ["line item", "items", "table", "breakdown", "list", "entries", "charges", "fees", "subtotal", "tax"]):
         items = doc_meta.get("line_items") or (json.loads(fin_record["line_items_json"]) if fin_record and fin_record.get("line_items_json") else None)
         subtotal = fin_record.get("subtotal") if fin_record else doc_meta.get("subtotal")
         tax = fin_record.get("tax_amount") if fin_record else doc_meta.get("tax_amount")
-        discount = fin_record.get("discount_amount") if fin_record else doc_meta.get("discount_amount")
-        handling = fin_record.get("handling_fee") if fin_record else doc_meta.get("handling_fee")
 
-        if subtotal is not None or items:
-            ans_parts.append("### Financial Breakdown & Items\n")
+        # Check for table rows containing '|' or tabs in pages
+        table_lines = []
+        for pg in pages:
+            for line in (pg.get("cleaned_text") or pg.get("raw_text") or "").splitlines():
+                if "|" in line or "\t" in line or (len(line.split()) >= 3 and any(char.isdigit() for char in line)):
+                    if len(line.strip()) > 8 and not line.strip().startswith("#"):
+                        table_lines.append((pg.get("page_number", 1), line.strip()))
+
+        if items or subtotal is not None or table_lines:
+            ans_parts.append(f"### Itemized Breakdown & Records for {doc_name}\n")
             if subtotal is not None: ans_parts.append(f"- **Subtotal:** {_clean_num_str(subtotal)}")
             if tax is not None: ans_parts.append(f"- **Tax:** {_clean_num_str(tax)}")
-            if discount is not None: ans_parts.append(f"- **Discount:** {_clean_num_str(discount)}")
-            if handling is not None: ans_parts.append(f"- **Handling Fee:** {_clean_num_str(handling)}")
 
             if items and isinstance(items, list):
-                ans_parts.append("\n**Extracted Items:**")
-                for itm in items[:10]:
+                ans_parts.append("\n**Items / Entries:**")
+                for itm in items[:12]:
                     if isinstance(itm, dict):
-                        desc = itm.get("description", "Item")
-                        qty = itm.get("quantity", 1)
+                        desc = itm.get("description") or itm.get("name") or "Entry"
+                        qty = itm.get("quantity")
                         amt = itm.get("amount") or itm.get("total") or itm.get("unit_price")
-                        amt_str = f" (${amt})" if amt else ""
-                        ans_parts.append(f"- {qty}x {desc}{amt_str}")
+                        qty_str = f"{qty}x " if qty else ""
+                        amt_str = f" ({_clean_num_str(amt)})" if amt else ""
+                        ans_parts.append(f"- {qty_str}{desc}{amt_str}")
                     else:
                         ans_parts.append(f"- {itm}")
 
-            sources.append(ChatSource(page=1, label="Line Items", snippet="Extracted itemized table & financial subtotals."))
+            elif table_lines:
+                ans_parts.append("\n**Extracted Data Rows:**")
+                for p_num, row in table_lines[:8]:
+                    ans_parts.append(f"- {row} *(Page {p_num})*")
+
+            sources.append(ChatSource(page=1, label="Items", snippet="Extracted table records and itemized rows."))
             return "\n".join(ans_parts), sources, 0.95
 
-    # 7. Semantic Full-Text Search fallback across all document pages
-    query_words = set(re.findall(r"\b\w{3,}\b", q)) - {"what", "when", "where", "which", "does", "have", "this", "that", "from", "with", "show", "find", "tell"}
-    best_snippets = []
+    # 6. Universal Semantic Sentence & Paragraph Search
+    # Works on ANY document: medical, legal, research, academic, logs, reports, letters, books
+    scored_sentences = []
+    stop_words = {"what", "when", "where", "which", "who", "whom", "whose", "why", "how", "does", "have", "this", "that", "from", "with", "show", "find", "tell", "give", "the", "and", "for", "are", "was", "were", "been", "being", "can", "could", "would", "should"}
+    keywords = [w for w in re.findall(r"\b[a-z0-9_-]{3,}\b", q) if w not in stop_words]
 
     for pg in pages:
         txt = pg.get("cleaned_text") or pg.get("raw_text") or ""
         p_num = pg.get("page_number", 1)
-        paragraphs = re.split(r"\n\s*\n|\.\s+", txt)
-        for para in paragraphs:
-            para_clean = para.strip()
-            if len(para_clean) < 15:
+        # Split into sentences or lines
+        sentences = re.split(r"(?<=[.!?])\s+|\n+", txt)
+        for s in sentences:
+            s_clean = s.strip()
+            if len(s_clean) < 12:
                 continue
-            para_lower = para_clean.lower()
-            overlap = sum(1 for w in query_words if w in para_lower)
-            if overlap > 0:
-                best_snippets.append((overlap, p_num, para_clean))
+            s_lower = s_clean.lower()
+            match_count = sum(1 for kw in keywords if kw in s_lower)
+            if match_count > 0:
+                scored_sentences.append((match_count, p_num, s_clean))
 
-    if best_snippets:
-        best_snippets.sort(key=lambda x: x[0], reverse=True)
-        top = best_snippets[:3]
-        ans_parts.append(f"Based on the contents of **{doc_name}**:\n")
-        for score, p_num, snippet in top:
-            ans_parts.append(f"> \"{snippet}\"\n*(Page {p_num})*\n")
-            sources.append(ChatSource(page=p_num, snippet=snippet[:200]))
-        return "\n".join(ans_parts), sources, 0.90
+    if scored_sentences:
+        scored_sentences.sort(key=lambda x: (x[0], len(x[2])), reverse=True)
+        top_matches = scored_sentences[:4]
+        ans_parts.append(f"Here is what **{doc_name}** states regarding your query:\n")
+        for score, p_num, snippet in top_matches:
+            ans_parts.append(f"> \"{snippet}\"\n*(Source: Page {p_num})*\n")
+            sources.append(ChatSource(page=p_num, snippet=snippet[:250]))
+        return "\n".join(ans_parts), sources, 0.92
 
-    # Fallback response grounded in document metadata
-    doc_type = (fin_record.get("document_type") if fin_record else doc_meta.get("document_type")) or "document"
-    ans = (
-        f"I reviewed **{doc_name}** (classified as *{doc_type}*).\n\n"
-        f"I could not locate an exact match for '{question}' in the extracted text. "
-        f"You can ask about:\n"
-        f"- **Amounts:** Total Amount Due, Subtotal, Taxes, Discounts, Payroll, Handling\n"
-        f"- **Dates:** Due Date, Invoice Date, Payment Terms\n"
-        f"- **Entities:** Invoice #, PO #, Vendor, Customer\n"
-        f"- **Summaries:** Request an overview or list of line items."
-    )
-    return ans, sources, 0.60
+    # 7. Grounded Document Overview Fallback
+    ans_parts.append(f"I analyzed **{doc_name}** (classified as *{doc_type}*).\n")
+    ans_parts.append(f"While I did not find a direct mention of \"{question}\", here are the primary data points detected:")
+    if kv_pairs:
+        for kv in kv_pairs[:5]:
+            ans_parts.append(f"- **{kv['key']}:** {kv['value']} *(Page {kv['page']})*")
+    elif len(pages) > 0:
+        first_page_snippet = (pages[0].get("cleaned_text") or "")[:200].strip()
+        if first_page_snippet:
+            ans_parts.append(f"\n> \"{first_page_snippet}...\"\n*(Page 1)*")
+    ans_parts.append(f"\nYou can ask about any specific label, person, date, condition, number, table, or section in this document.")
+    return "\n".join(ans_parts), sources, 0.65
 
 
 @router.post("/ask", response_model=ChatResponse)
