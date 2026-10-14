@@ -20,7 +20,9 @@ logger = logging.getLogger(__name__)
 MAGIC_BYTES: dict[str, list[bytes]] = {
     "pdf": [b"%PDF"],
     "docx": [b"PK\x03\x04"],   # ZIP-based (docx, xlsx, etc.)
+    "xlsx": [b"PK\x03\x04"],   # ZIP-based Excel
     "doc": [b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"],  # OLE2 compound
+    "xls": [b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"],  # OLE2 compound Excel
     "jpg": [b"\xff\xd8\xff"],
     "jpeg": [b"\xff\xd8\xff"],
     "png": [b"\x89PNG\r\n\x1a\n"],
@@ -35,7 +37,7 @@ MAGIC_BYTES: dict[str, list[bytes]] = {
 }
 
 ALLOWED_EXTENSIONS = {
-    "pdf", "docx", "doc", "jpg", "jpeg", "png", "webp",
+    "pdf", "docx", "doc", "xlsx", "xls", "csv", "jpg", "jpeg", "png", "webp",
     "wav", "mp3", "mp4", "mov", "avi", "mkv", "webm", "txt"
 }
 MAX_FILE_SIZE_BYTES = 500 * 1024 * 1024  # 500 MB (expanded for video/audio)
@@ -103,8 +105,11 @@ def validate_and_ingest(
     # (e.g., JPEG bytes claiming to be PDF is rejected)
     _EXT_TO_TYPE = {
         "pdf": {"pdf"},
-        "docx": {"docx"},
-        "doc": {"doc"},
+        "docx": {"docx", "xlsx"},
+        "doc": {"doc", "xls"},
+        "xlsx": {"xlsx", "docx"},
+        "xls": {"xls", "doc"},
+        "csv": {"csv", "txt"},
         "jpg": {"jpg", "jpeg"},
         "jpeg": {"jpg", "jpeg"},
         "png": {"png"},
@@ -116,7 +121,7 @@ def validate_and_ingest(
         "avi": {"avi"},
         "mkv": {"mkv", "webm"},
         "webm": {"webm", "mkv"},
-        "txt": {"txt"},
+        "txt": {"txt", "csv"},
     }
     allowed_detected = _EXT_TO_TYPE.get(suffix, {suffix})
     if detected_type not in allowed_detected:
@@ -162,8 +167,8 @@ def _detect_file_type(data: bytes, claimed_extension: str) -> Optional[str]:
     Detect actual file type from magic bytes.
     Returns the detected type, or None if it doesn't match the claimed extension.
     """
-    if claimed_extension == "txt":
-        return "txt"
+    if claimed_extension in ("txt", "csv"):
+        return claimed_extension
 
     header = data[:16]
 
@@ -173,13 +178,15 @@ def _detect_file_type(data: bytes, claimed_extension: str) -> Optional[str]:
             if header.startswith(magic):
                 detected = ftype
 
-                # DOCX/DOC disambiguation: both are PK (ZIP) magic
-                # DOCX is a ZIP. DOC is OLE2.
-                if detected == "docx" and claimed_extension == "docx":
+                # Disambiguation for ZIP-based (DOCX, XLSX)
+                if detected in ("docx", "xlsx"):
+                    if claimed_extension == "xlsx":
+                        return "xlsx"
                     return "docx"
-                elif detected == "docx" and claimed_extension == "doc":
-                    return "docx"
-                elif detected == "doc":
+                # Disambiguation for OLE2 compound (DOC, XLS)
+                elif detected in ("doc", "xls"):
+                    if claimed_extension == "xls":
+                        return "xls"
                     return "doc"
                 elif detected in ("jpg", "jpeg"):
                     return "jpg"
@@ -201,8 +208,8 @@ def _detect_file_type(data: bytes, claimed_extension: str) -> Optional[str]:
         elif tag == b"AVI ":
             return "avi"
 
-    # Permissive fallback if claimed extension is audio/video
-    if claimed_extension in ("mp3", "wav", "mp4", "mov", "avi", "mkv", "webm"):
+    # Permissive fallback if claimed extension is audio/video/spreadsheet
+    if claimed_extension in ("mp3", "wav", "mp4", "mov", "avi", "mkv", "webm", "csv", "xlsx", "xls"):
         return claimed_extension
 
     return None

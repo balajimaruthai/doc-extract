@@ -36,11 +36,27 @@ async def upload_document(file: UploadFile = File(...)):
     # Check for duplicate
     async with get_connection() as conn:
         existing = await conn.execute(
-            "SELECT id, original_filename FROM documents WHERE content_hash = ?",
+            """SELECT id, original_filename, processing_status, file_type, file_size, document_type, metadata_json 
+               FROM documents WHERE content_hash = ?""",
             (metadata.content_hash,)
         )
         dup = await existing.fetchone()
         if dup:
+            if dup["processing_status"] == "completed":
+                return JSONResponse(
+                    status_code=200,
+                    content={
+                        "id": dup["id"],
+                        "filename": dup["original_filename"],
+                        "file_type": dup["file_type"] or metadata.file_type,
+                        "file_size": dup["file_size"] or metadata.file_size,
+                        "document_type": dup["document_type"],
+                        "status": "completed",
+                        "cached": True,
+                        "message": "Document previously processed. Returning cached result.",
+                        "existing_id": dup["id"],
+                    }
+                )
             return JSONResponse(
                 status_code=409,
                 content={

@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 TARGET_DPI = 180
 TARGET_SHORT_EDGE_PX = 900    # Minimum short-edge pixels for good OCR
-MAX_LONG_EDGE_PX = 1600       # Cap oversized images to prevent slow OCR latency
+MAX_LONG_EDGE_PX = 3400       # Cap oversized images while preserving 300 DPI text details
 
 
 @dataclass
@@ -37,7 +37,7 @@ def preprocess_for_ocr(
 
     Pipeline (applied selectively based on image quality):
     1. Convert to grayscale
-    2. Normalize resolution (scale down if > 1600px, scale up if < 900px)
+    2. Normalize resolution (scale down if > 3400px, scale up if < 900px)
     3. Denoise (fast Gaussian if aggressive)
     4. Deskew (if aggressive)
     5. Adaptive threshold (for poor contrast)
@@ -61,7 +61,7 @@ def preprocess_for_ocr(
     else:
         gray = img.copy()
 
-    # Step 2: Normalize dimensions for fast OCR (< 500ms)
+    # Step 2: Normalize dimensions for fast high-accuracy OCR
     h, w = gray.shape[:2]
     long_edge = max(h, w)
     short_edge = min(h, w)
@@ -93,9 +93,10 @@ def preprocess_for_ocr(
             gray = _deskew(gray, skew_angle)
             was_deskewed = True
 
-    # Step 5: Adaptive thresholding for low-contrast / uneven lighting
+    # Step 5: Adaptive thresholding for poor contrast / dark backgrounds
+    mean_val = float(np.mean(gray))
     contrast = _estimate_contrast(gray)
-    if contrast < 45 or aggressive:
+    if aggressive or (contrast < 25 and mean_val < 160):
         gray = cv2.adaptiveThreshold(
             gray, 255,
             cv2.ADAPTIVE_THRESH_GAUSSIAN_C,

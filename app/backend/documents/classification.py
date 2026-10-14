@@ -25,14 +25,27 @@ class DocumentType(str, Enum):
     TRAINING_CERTIFICATE = "training_certificate"
     ACHIEVEMENT_CERTIFICATE = "achievement_certificate"
     PAYSLIP = "payslip"
+    SALARY_SLIP = "salary_slip"
     INVOICE = "invoice"
     BILL = "bill"
+    RECEIPT = "receipt"
+    PURCHASE_ORDER = "purchase_order"
+    QUOTATION = "quotation"
+    ESTIMATE = "estimate"
+    DELIVERY_NOTE = "delivery_note"
+    CONTRACT = "contract"
+    LETTER = "letter"
+    FORM = "form"
+    FINANCIAL_STATEMENT = "financial_statement"
+    BANK_STATEMENT = "bank_statement"
+    SPREADSHEET = "spreadsheet"
     BOOK = "book"
     PROJECT_REPORT = "project_report"
     RESEARCH_PAPER = "research_paper"
     PHOTO_DOCUMENT = "photo_document"
     AUDIO = "audio"
     VIDEO = "video"
+    UNKNOWN = "unknown"
     OTHER = "other"
     NEEDS_REVIEW = "needs_review"
 
@@ -49,6 +62,8 @@ class ClassificationResult:
     confidence: ConfidenceLevel
     method: str           # "rules", "llm", "hybrid"
     reasoning: str        # Human-readable explanation
+    document_subtype: Optional[str] = None
+    confidence_score: float = 0.95
 
 
 # ─────────────────────────────────────────────────────────────
@@ -98,11 +113,44 @@ TEXT_PATTERNS: list[tuple[re.Pattern, DocumentType, int]] = [
     (re.compile(r"\b(worked|employed|served)\s+(with|at|in)\b.{0,200}\b(from|since)\b", re.I | re.S), DocumentType.EXPERIENCE_LETTER, 18),
     (re.compile(r"\brelieving\s+letter\b", re.I), DocumentType.EXPERIENCE_LETTER, 24),
 
+    # Purchase Orders
+    (re.compile(r"\b(purchase\s+order|p\.?o\.?\s*#|buyer\s*name|po\s+date|deliver\s+to|vendor\s+code)\b", re.I), DocumentType.PURCHASE_ORDER, 26),
+
+    # Quotations & Estimates
+    (re.compile(r"\b(quotation|proforma\s+invoice|price\s+quote|estimate\s*#|valid\s+until|validity\s+period)\b", re.I), DocumentType.QUOTATION, 25),
+
+    # Delivery Notes & Shipping Documents
+    (re.compile(r"\b(delivery\s+note|packing\s+slip|bill\s+of\s+lading|consignee|waybill|shipping\s+manifest)\b", re.I), DocumentType.DELIVERY_NOTE, 25),
+
+    # Contracts & Agreements
+    (re.compile(r"\b(contract|agreement|terms\s+and\s+conditions|hereby\s+agree|parties\s+hereto|effective\s+date|governing\s+law)\b", re.I), DocumentType.CONTRACT, 26),
+
+    # Salary Slips & Payslips
+    (re.compile(r"\b(salary\s+slip|payslip|pay\s+stub|earnings\s+statement|net\s+pay|basic\s+pay|provident\s+fund)\b", re.I), DocumentType.SALARY_SLIP, 26),
+
+    # Forms & Applications
+    (re.compile(r"\b(application\s+form|registration\s+form|enrollment\s+form|declaration|applicant\s+signature)\b", re.I), DocumentType.FORM, 24),
+
+    # General Business / Professional Letters
+    (re.compile(r"\b(dear\s+(?:mr|ms|dr|sir|madam)|to\s+whom\s+it\s+may\s+concern|sincerely|yours\s+faithfully)\b", re.I), DocumentType.LETTER, 14),
+
     # Corporate Invoice / Billing / Payroll Statement
     (re.compile(r"\b(invoice|tax\s+invoice|bill\s+to|invoice\s*#|invoice\s+no|remit\s+payment\s+to)\b", re.I), DocumentType.INVOICE, 25),
     (re.compile(r"\b(total\s+amount\s+due|amount\s+due|balance\s+due|gross\s+wages|total\s+gross|wire\s+routing|routing\s+number)\b", re.I), DocumentType.INVOICE, 25),
     (re.compile(r"\b(terms\s*:\s*dd\s+net|net\s+\d+\s+days?|due\s+date|payment\s+terms)\b", re.I), DocumentType.INVOICE, 20),
     (re.compile(r"\b(payroll\s+charges|employer\s+fringes|total\s+fringe|payroll\s+total)\b", re.I), DocumentType.INVOICE, 22),
+
+    # Receipts & Point of Sale (POS)
+    (re.compile(r"\b(receipt|sales\s+receipt|pos\s+receipt|terminal\s*#|merchant|cashier|subtotal|sales\s+tax|tip\s*[$€£₹\d]|gratuity)\b", re.I), DocumentType.RECEIPT, 25),
+    (re.compile(r"\b(store\s*#|register\s*#|item\s+count|order\s*#|customer\s+receipt|visa\s+ending|mastercard\s+ending|amex\s+ending)\b", re.I), DocumentType.RECEIPT, 20),
+
+    # Financial Statements / Bank Statements / Monthly Transactions
+    (re.compile(r"\b(bank\s+statement|account\s+statement|monthly\s+statement|statement\s+period|period\s+covered)\b", re.I), DocumentType.FINANCIAL_STATEMENT, 26),
+    (re.compile(r"\b(opening\s+balance|closing\s+balance|beginning\s+balance|ending\s+balance|previous\s+balance|new\s+balance)\b", re.I), DocumentType.FINANCIAL_STATEMENT, 25),
+    (re.compile(r"\b(total\s+deposits|total\s+withdrawals|total\s+credits|total\s+debits|checks\s+paid|daily\s+ledger)\b", re.I), DocumentType.FINANCIAL_STATEMENT, 22),
+
+    # Spreadsheets / Excel Models
+    (re.compile(r"\b(sheet\s*:\s*|calculated\s+totals|csv_data|total\s+debits?|total\s+credits?|grand\s+total)\b", re.I), DocumentType.SPREADSHEET, 24),
 
     # Offer Letter
     (re.compile(r"\boffer\s+letter\b", re.I), DocumentType.OFFER_LETTER, 14),
@@ -135,7 +183,10 @@ TEXT_PATTERNS: list[tuple[re.Pattern, DocumentType, int]] = [
 # Filename hints
 FILENAME_HINTS: list[tuple[re.Pattern, DocumentType, int]] = [
     (re.compile(r"\b(resume|cv|biodata)\b", re.I), DocumentType.RESUME, 30),
-    (re.compile(r"\b(invoice|bill|receipt|statement|payroll)\b", re.I), DocumentType.INVOICE, 30),
+    (re.compile(r"\b(invoice|bill|statement|payroll)\b", re.I), DocumentType.INVOICE, 30),
+    (re.compile(r"\b(receipt|sales_receipt|pos_slip|expense_receipt)\b", re.I), DocumentType.RECEIPT, 30),
+    (re.compile(r"\b(bank_stmt|bank_statement|account_stmt|monthly_txn|ledger)\b", re.I), DocumentType.FINANCIAL_STATEMENT, 30),
+    (re.compile(r"\.(xlsx|xls|csv)$", re.I), DocumentType.SPREADSHEET, 35),
     (re.compile(r"\b(book|textbook|handbook|manual|guide|ebook|novel)\b", re.I), DocumentType.BOOK, 25),
     (re.compile(r"\b(project|report|capstone|thesis|synopsis)\b", re.I), DocumentType.PROJECT_REPORT, 25),
     (re.compile(r"\b(paper|ieee|icccnt|conference|journal|publication)\b", re.I), DocumentType.RESEARCH_PAPER, 25),
@@ -152,7 +203,7 @@ FILENAME_HINTS: list[tuple[re.Pattern, DocumentType, int]] = [
 
 def classify_document(
     text: str,
-    original_filename: str,
+    original_filename: str = "",
     use_llm: bool = False,
 ) -> ClassificationResult:
     """
@@ -236,19 +287,61 @@ def classify_document(
 
     if best_score >= 10 and dominance >= 0.5:
         confidence = ConfidenceLevel.HIGH
+        conf_score = 0.95
     elif best_score >= 4:
         confidence = ConfidenceLevel.MEDIUM
+        conf_score = 0.80
     else:
         confidence = ConfidenceLevel.LOW
+        conf_score = 0.50
+
+    # Determine document subtype
+    text_lower = text.lower()
+    subtype: Optional[str] = None
+    if best_type == DocumentType.INVOICE:
+        if any(k in text_lower for k in ["payroll", "fringe", "gross wages", "total gross"]):
+            subtype = "payroll_billing"
+        elif any(k in text_lower for k in ["tax invoice", "gst", "vat"]):
+            subtype = "tax_invoice"
+        else:
+            subtype = "commercial_invoice"
+    elif best_type == DocumentType.RECEIPT:
+        subtype = "pos_receipt" if "terminal" in text_lower or "cashier" in text_lower else "sales_receipt"
+    elif best_type in (DocumentType.FINANCIAL_STATEMENT, DocumentType.BANK_STATEMENT):
+        subtype = "bank_account_statement"
+    elif best_type == DocumentType.PURCHASE_ORDER:
+        subtype = "standard_purchase_order"
+    elif best_type == DocumentType.CONTRACT:
+        subtype = "legal_agreement"
+    elif best_type in (DocumentType.RESUME, DocumentType.CV):
+        subtype = "curriculum_vitae" if "curriculum vitae" in text_lower or "cv" in text_lower else "professional_resume"
+    elif best_type == DocumentType.DEGREE_CERTIFICATE:
+        subtype = "academic_degree"
+    elif best_type in (DocumentType.PROFESSIONAL_CERTIFICATE, DocumentType.TRAINING_CERTIFICATE):
+        subtype = "course_completion_credential"
+    elif best_type == DocumentType.RESEARCH_PAPER:
+        subtype = "conference_or_journal_paper"
+    elif best_type == DocumentType.PROJECT_REPORT:
+        subtype = "academic_or_engineering_report"
+
+    # If confidence is low, do not force an incorrect category (Requirement 3)
+    final_type = best_type
+    if confidence == ConfidenceLevel.LOW:
+        if not text.strip():
+            final_type = DocumentType.NEEDS_REVIEW
+        else:
+            final_type = DocumentType.UNKNOWN
 
     logger.info(
-        f"Classified '{original_filename}' as {best_type.value} "
-        f"(score={best_score}, confidence={confidence.value})"
+        f"Classified '{original_filename}' as {final_type.value} "
+        f"(subtype={subtype}, score={best_score}, confidence={confidence.value})"
     )
 
     return ClassificationResult(
-        document_type=best_type,
+        document_type=final_type,
         confidence=confidence,
         method="rules",
         reasoning=f"Score: {best_score}/{total_score}. Dominant signals matched {best_type.value} pattern.",
+        document_subtype=subtype,
+        confidence_score=conf_score,
     )

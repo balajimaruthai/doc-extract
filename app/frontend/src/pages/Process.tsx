@@ -114,8 +114,7 @@ export function Process() {
         </div>
 
         <div style={{ fontSize: 12, color: 'var(--color-text-secondary)' }}>
-          <strong>Pipeline:</strong> File validation → Text extraction → OCR (if needed) →
-          Document classification → AI extraction → Validation → Profile generation
+          <strong>Pipeline:</strong> Uploading → Reading → Extracting → Analyzing → Validating → Completed
         </div>
       </div>
 
@@ -141,8 +140,8 @@ export function Process() {
                 <th>Document</th>
                 <th>Type</th>
                 <th>Size</th>
-                <th>Stage</th>
-                <th>Result</th>
+                <th>Pipeline Stage</th>
+                <th>Verification &amp; Result</th>
               </tr>
             </thead>
             <tbody>
@@ -150,12 +149,25 @@ export function Process() {
                 const status = getDocStatus(doc.id)
                 const isSelected = selectedIds.has(doc.id)
                 const isPending = doc.processing_status === 'pending'
+                let meta: any = null
+                if (doc.metadata_json) {
+                  try { meta = JSON.parse(doc.metadata_json) } catch {}
+                }
+
+                const latestStage = status?.processing_stages?.[0]?.stage
+                const stageLabel = latestStage ? (
+                  latestStage === 'reading' || latestStage === 'text_extraction' ? 'Reading' :
+                  latestStage === 'extracting' ? 'Extracting' :
+                  latestStage === 'analyzing' || latestStage === 'llm_extraction' ? 'Analyzing' :
+                  latestStage === 'validating' ? 'Validating' :
+                  latestStage === 'completed' ? 'Completed' : latestStage
+                ) : null
 
                 return (
                   <tr
                     key={doc.id}
                     onClick={() => isPending && toggleSelect(doc.id)}
-                    style={{ cursor: isPending ? 'pointer' : 'default', opacity: isPending ? 1 : 0.6 }}
+                    style={{ cursor: isPending ? 'pointer' : 'default', opacity: isPending ? 1 : 0.85 }}
                   >
                     <td>
                       {isPending && (
@@ -171,28 +183,56 @@ export function Process() {
                       <div style={{ fontWeight: 500 }}>{doc.original_filename}</div>
                       <div className="text-xs text-muted font-mono">{doc.id.slice(0, 8)}…</div>
                     </td>
-                    <td><span className="badge badge-neutral">{doc.file_type.toUpperCase()}</span></td>
+                    <td>
+                      <span className="badge badge-neutral">{doc.file_type.toUpperCase()}</span>
+                      {doc.document_type && (
+                        <span className="badge badge-info" style={{ marginLeft: 4, fontSize: 10 }}>
+                          {doc.document_type}
+                        </span>
+                      )}
+                    </td>
                     <td className="text-muted text-sm">
                       {(doc.file_size / 1024).toFixed(0)} KB
                     </td>
                     <td>
-                      {status ? (
-                        <div>
-                          {status.processing_stages.slice(-1).map(stage => (
-                            <div key={stage.stage} className="text-sm">
-                              <span className="text-muted">{stage.stage}:</span>{' '}
-                              <span style={{ color: stage.status === 'success' ? 'var(--color-success)' : stage.status === 'failed' ? 'var(--color-error)' : 'var(--color-warning)' }}>
-                                {stage.status}
-                              </span>
-                            </div>
-                          ))}
+                      {doc.processing_status === 'processing' ? (
+                        <div className="flex items-center gap-xs">
+                          <div className="spinner" style={{ width: 12, height: 12 }} />
+                          <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-primary)' }}>
+                            {stageLabel || 'Extracting'}…
+                          </span>
                         </div>
+                      ) : doc.processing_status === 'completed' ? (
+                        <span style={{ fontSize: 12, color: 'var(--color-success)', fontWeight: 500 }}>
+                          ✓ Completed
+                        </span>
                       ) : (
-                        <span className="text-muted">—</span>
+                        <span className="text-muted text-sm">—</span>
                       )}
                     </td>
                     <td>
-                      {doc.processing_status === 'completed' && <span className="badge badge-success">Done</span>}
+                      {doc.processing_status === 'completed' && (
+                        <div>
+                          <div className="flex items-center gap-xs flex-wrap">
+                            <span className="badge badge-success">Done</span>
+                            {meta?.math_verified && (
+                              <span className="badge" style={{ backgroundColor: '#dcfce7', color: '#15803d', border: '1px solid #86efac', fontSize: 10, fontWeight: 700 }}>
+                                ✓ Math Verified
+                              </span>
+                            )}
+                          </div>
+                          {meta?.total_amount_due && (
+                            <div className="text-xs mt-xs" style={{ fontWeight: 600, color: 'var(--color-text)' }}>
+                              Total Due: ${String(meta.total_amount_due).replace(/^\$/, '')}
+                            </div>
+                          )}
+                          {meta?.due_date && (
+                            <div className="text-xs text-muted">
+                              Due: {meta.due_date}
+                            </div>
+                          )}
+                        </div>
+                      )}
                       {doc.processing_status === 'failed' && (
                         <span className="badge badge-error" title={doc.error_message ?? ''}>Failed</span>
                       )}

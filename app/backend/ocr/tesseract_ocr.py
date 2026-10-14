@@ -52,7 +52,10 @@ def _configure_tesseract() -> bool:
     try:
         import os
         import pytesseract
-        from core.config import settings
+        try:
+            from core.config import settings
+        except ImportError:
+            from app.backend.core.config import settings
 
         conda_prefix = os.environ.get("CONDA_PREFIX", "")
         import shutil
@@ -139,7 +142,7 @@ def run_ocr(
             pil_image,
             lang=lang,
             output_type=pytesseract.Output.DICT,
-            config="--psm 3 --oem 3",   # PSM 3 = auto, OEM 3 = LSTM
+            config="--psm 4 --oem 3",   # PSM 4 = single column of text of variable sizes (preserves table & invoice line layout)
         )
 
         words: list[OCRWord] = []
@@ -204,7 +207,7 @@ def run_ocr(
             full_text = pytesseract.image_to_string(
                 pil_image,
                 lang=lang,
-                config="--psm 3 --oem 3",
+                config="--psm 4 --oem 3",
             )
 
         mean_conf = float(np.mean(word_confidences))
