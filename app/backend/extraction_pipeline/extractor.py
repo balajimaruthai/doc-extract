@@ -1112,9 +1112,11 @@ def _apply_rule_based_fallbacks(text: str, result: ExtractionResult, document_ty
                 a_str = re.sub(r"\s+", "", ach_match.group(1))
                 result.routing_number = f"Wire: {w_str} / ACH: {a_str}"
             elif wire_match:
-                result.routing_number = f"Wire: {re.sub(r'\s+', '', wire_match.group(1))}"
+                w_str = re.sub(r"\s+", "", wire_match.group(1))
+                result.routing_number = f"Wire: {w_str}"
             elif ach_match:
-                result.routing_number = f"ACH: {re.sub(r'\s+', '', ach_match.group(1))}"
+                a_str = re.sub(r"\s+", "", ach_match.group(1))
+                result.routing_number = f"ACH: {a_str}"
             else:
                 routing_match = re.search(
                     r"(?:wire\s+routing|routing\s+number|routing\s+num|aba|ach\s+routing)\s*(?:number|num|#)?\s*[:\-\s]*([0-9\-\s]{4,20})",
