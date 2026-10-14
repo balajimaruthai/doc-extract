@@ -128,6 +128,31 @@ export const exportApi = {
   },
 }
 
+// ─── Chat / Document Q&A ──────────────────────────────────
+export interface ChatSource {
+  page?: number
+  label?: string
+  value?: string
+  snippet: string
+}
+
+export interface ChatResponse {
+  answer: string
+  confidence: number
+  document_id?: string
+  document_name?: string
+  sources: ChatSource[]
+  model_used: string
+}
+
+export const chatApi = {
+  ask: (question: string, documentId?: string, history?: { role: string; content: string }[]) =>
+    request<ChatResponse>('/chat/ask', {
+      method: 'POST',
+      body: JSON.stringify({ question, document_id: documentId, history }),
+    }),
+}
+
 // ─── Types ─────────────────────────────────────────────────
 export interface SystemStatus {
   status: 'ready' | 'setup_required'

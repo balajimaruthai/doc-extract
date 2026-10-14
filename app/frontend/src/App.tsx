@@ -3,7 +3,7 @@ import { useEffect, useState } from 'react'
 import {
   LayoutDashboard, FileText, Cpu, User, GraduationCap,
   Briefcase, Code2, Award, BookOpen, AlertTriangle, Download,
-  Settings, ChevronRight, Wifi, WifiOff
+  Settings, ChevronRight, Wifi, WifiOff, MessageSquare
 } from 'lucide-react'
 import { systemApi, type SystemStatus } from './api/client'
 import { Dashboard } from './pages/Dashboard'
@@ -12,6 +12,7 @@ import { Process } from './pages/Process'
 import { Profiles } from './pages/Profiles'
 import { ProfileDetail } from './pages/ProfileDetail'
 import { SettingsPage } from './pages/Settings'
+import { Chat } from './pages/Chat'
 
 export function App() {
   const [systemStatus, setSystemStatus] = useState<SystemStatus | null>(null)
@@ -75,6 +76,7 @@ export function App() {
           <nav className="sidebar-nav">
             <NavItem to="/" icon={<LayoutDashboard size={15} />} label="Dashboard" exact />
             <NavItem to="/documents" icon={<FileText size={15} />} label="Documents" />
+            <NavItem to="/chat" icon={<MessageSquare size={15} />} label="Ask AI (Offline)" />
             <NavItem to="/process" icon={<Cpu size={15} />} label="Process" />
 
             <div className="nav-section-label">Analysis</div>
@@ -119,6 +121,7 @@ export function App() {
           <Routes>
             <Route path="/" element={<Dashboard systemStatus={systemStatus} />} />
             <Route path="/documents" element={<Documents />} />
+            <Route path="/chat" element={<Chat />} />
             <Route path="/process" element={<Process />} />
             <Route path="/profiles" element={<Profiles />} />
             <Route path="/profiles/:id" element={<ProfileDetail />} />

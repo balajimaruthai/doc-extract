@@ -21,7 +21,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 from core.config import settings
 from core.logging_config import setup_logging
 from database.connection import init_db
-from api import documents, profiles, processing, export, system
+from api import documents, profiles, processing, export, system, chat
 
 # Demo mode: set DOCEXTRACT_DEMO=1 to allow external connections (for ngrok sharing)
 DEMO_MODE = os.getenv("DOCEXTRACT_DEMO", "0") == "1"
@@ -83,6 +83,7 @@ app.include_router(documents.router, prefix="/api/v1/documents", tags=["document
 app.include_router(profiles.router, prefix="/api/v1/profiles", tags=["profiles"])
 app.include_router(processing.router, prefix="/api/v1/processing", tags=["processing"])
 app.include_router(export.router, prefix="/api/v1/export", tags=["export"])
+app.include_router(chat.router, prefix="/api/v1/chat", tags=["chat"])
 
 
 @app.get("/health")
